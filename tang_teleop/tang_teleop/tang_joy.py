@@ -3,8 +3,8 @@ import rclpy
 from rclpy.node import Node
 
 import spidev
+import pigpio
 from tang_control.config import Pin, Control
-
 
 class TangJoystickController():
     def __init__(self):
