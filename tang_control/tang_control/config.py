@@ -1,36 +1,45 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import math
 
 class Pin:
-    encoder_l_A  = 5
-    encoder_l_B  = 6
-    direction_l = 18
-    pwm_l        = 13 
-    encoder_r_A  = 22
-    encoder_r_B  = 27
-    direction_r = 17
-    pwm_r        = 12
-    emergency_mode = 16
+    encoder_l_A  = 22
+    encoder_l_B  = 27
+    direction_l  = 17
+    pwm_l        = 12
+    encoder_r_A  = 5
+    encoder_r_B  = 6
+    direction_r  = 18
+    pwm_r        = 13
+    teleop_mode  = 16
+    follow_mode  = 21
+    vrx_channel  = 0
+    vry_channel  = 1
+    swt_channel  = 2
+    emergency_mode = 11
 
 class FOLLOWPID:
-    p_gain = 0.002
+    p_gain = 2.307
     d_gain = 0.0
     #d_gain = 7.0
-    dt = 0.01
+    dt = 0.1
 
 class PID:
-    Kp = 1.0
-    Ki = 0.01
-    Kd = 0.00
+    Kp_v = 1.0
+    Ki_v = 0.01
+    Kd_v = 0.00
+    Kp_w = 0.5
+    Ki_w = 0.001
+    Kd_w = 0.00
+    max_error_sum_w = 50
+    max_error_sum_v = 10
     dt = 0.005 # 0.0001がmax
-    max_error_sum_v = 2
-    max_error_sum_w = 2
-    
+
 class PWM:
     # PWM周波数をHzで指定
     freq = 1000 # [Hz]
     max_duty = 50
-    
+
 class Fig:
     time_data  = []
     vel_data = []
@@ -40,22 +49,24 @@ class Fig:
     target_a_data = []
 
 class Control:
+    max_linear_vel = 0.3
+    max_angular_vel = 1.0
+    max_linear_vel_manual = 0.8
+    max_angular_vel_manual = 0.8
+    max_joystick_val = 1023.0
+    velocity_thresh = 1e-2
     # 入力電圧
-    input_v = 24
-    # 最大角速度
-    max_w = 0.8
-    # 最大速度
-    max_velocity = 0.8
+    input_v = 27
     # 目標角速度
-    w_target = 0.2
+    w_target = 0.0001
     # 目標速度
-    v_target = 0.4
+    v_target = 0.3
     # 目標加速度
-    a_target = 0.01
-    # 目標減速加速度
-    d_target = -0.1
+    a_target = 0.1
     # 目標角加速度
-    alpha_target = 0.01
+    alpha_target = 0.2
+    # 目標減速加速度
+    d_target = -0.25
     # 逆起電圧定数
     Ke_r = 0.5905
     Ke_l = 0.5905
@@ -64,14 +75,14 @@ class Control:
     Kt_l = 0.6666
     # 巻線抵抗
     R = 3.05931
-    # エンコーダ値1あたりの回転角度[rad]
-    radian_1encoder_r = 0.00306
-    radian_1encoder_l = 0.003095
     # モータ１回転あたりのエンコーダ値
     encoder_1rotation_r = 2030
     encoder_1rotation_l = 2030
+    # エンコーダ値1あたりの回転角度[rad]
+    radian_1encoder_r = 2*math.pi/encoder_1rotation_r
+    radian_1encoder_l = 2*math.pi/encoder_1rotation_l
     # モータの回転数
-    rotation_num = 5
+    rotation_num = 2
     # トレッド幅[m]
     tread_w = 0.32
     # 車輪半径[m]
@@ -81,11 +92,6 @@ class Control:
     # 車体慣性モーメント J = ml^2
     # J = 1/3(a^2 + b^2) 44cm, 40cm = 0.58999
     J = M*(0.22*0.22 + 0.2*0.2)/3
-    
+
 class HumanFollowParam:
-    # 対象物が小さい場合は追従しないためのパラメータ
-    min_area_thresh = 40
-    # 対象物の大きさに応じて速度を変更するためのパラーメタ
-    max_area_thresh = 300
-    # 画像中心のx座標
-    image_center = 1280/2
+    depth_min_thresh = 0.5

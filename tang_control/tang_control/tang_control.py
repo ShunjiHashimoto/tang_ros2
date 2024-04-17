@@ -18,7 +18,7 @@
 
 import rclpy
 from rclpy.node import Node
-from mymodule.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
+from config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
 # import pigpio
 
 class TangController(Node):
