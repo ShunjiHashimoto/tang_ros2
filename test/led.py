@@ -1,18 +1,19 @@
 #!/usr/bin/python3
 
-import gpiod
 import time
+import sys
+sys.path.append("..")
+from tang_control.tang_control.config import Pin
+from gpiozero import LED
 
-PIN_NO = 17
-chip = gpiod.Chip('gpiochip4', gpiod.Chip.OPEN_BY_NAME)
-line = chip.get_line(PIN_NO)
-line.request(consumer="LED", type=gpiod.LINE_REQ_DIR_OUT)
-
+led = LED(Pin.led)
 try:
     while True:
-        line.set_value(1)
-        time.sleep(1)
-        line.set_value(0)
-        time.sleep(1)
+        led.on()
+        print(f"blink: {led.value}")
+        time.sleep(1.0)
+        led.off()
+        print(f"stop: {led.value}")
+        time.sleep(1.0)
 finally:
-    line.release()
+    led.release()

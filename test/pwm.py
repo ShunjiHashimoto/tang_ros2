@@ -1,18 +1,19 @@
 #!/usr/bin/python3
 
-import gpiod
 import time
+import sys
+sys.path.append("..")
+from tang_control.tang_control.config import Pin
+from gpiozero import PWMOutputDevice
 
-PIN_NO = 12
-chip = gpiod.Chip('gpiochip4', gpiod.Chip.OPEN_BY_NAME)
-line = chip.get_line(PIN_NO)
-line.request(consumer="LED", type=gpiod.LINE_REQ_DIR_OUT)
-
+motor_pin = PWMOutputDevice(Pin.pwm_r)
 try:
     while True:
-        line.set_value(1)
-        time.sleep(1)
-        line.set_value(0)
-        time.sleep(1)
+        motor_pin.value = 0.0
+        time.sleep(1.0)
+        motor_pin.value = 0.5
+        time.sleep(1.0)
+        motor_pin.value = 0.8
+        time.sleep(1.0)
 finally:
-    line.release()
+    motor_pin.close()

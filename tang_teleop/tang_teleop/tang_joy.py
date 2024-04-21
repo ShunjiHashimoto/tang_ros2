@@ -2,9 +2,11 @@
 import rclpy
 from rclpy.node import Node
 
+import sys
+sys.path.append("..")
+from tang_control.tang_control.config import Pin, Control 
 import spidev
-import pigpio
-from tang_control.config import Pin, Control
+import gpiozero
 
 class TangJoystickController():
     def __init__(self):

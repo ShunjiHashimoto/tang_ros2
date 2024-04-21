@@ -16,6 +16,8 @@ class Pin:
     vrx_channel  = 0
     vry_channel  = 1
     swt_channel  = 2
+    # 25
+    led = 25 # or 26
     emergency_mode = 11
 
 class FOLLOWPID:
