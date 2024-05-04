@@ -57,16 +57,57 @@ class TangController(Node):
         adc = spi.xfer2([1, (8 + channel)<<4, 0])
         data = ((adc[1]&3) << 8) + adc[2]
         return data
+    
+    def normalize_joystick_input(self, value, max_output=Control.max_duty):
+        return value*max_output
+    
+    def calc_motor_command(self, joystick_x, joystick_y):
+        x = self.normalize_joystick_input(joystick_x)
+        y = self.normalize_joystick_input(joystick_y)
+        if(y > 0):
+            if(x > 0):
+                right_motor_pwm = y 
+                left_motor_pwm = ((Control.max_duty - x)/Control.max_duty) * y
+            if(x <= 0):
+                right_motor_pwm = ((Control.max_duty + x)/Control.max_duty) * y
+                left_motor_pwm = y
+        elif(y <= 0):
+            if(x > 0):
+                right_motor_pwm = y 
+                left_motor_pwm = -abs(((Control.max_duty - x)/Control.max_duty) * y)
+            if(x <= 0):
+                left_motor_pwm =  y
+                right_motor_pwm = -abs(((Control.max_duty + x)/Control.max_duty) * y)
+        print(f"right; {right_motor_pwm} ; left: {left_motor_pwm}")
+        left_motor_pwm = max(min(left_motor_pwm, Control.max_duty), -Control.max_duty)
+        right_motor_pwm = max(min(right_motor_pwm, Control.max_duty), -Control.max_duty)
+        return left_motor_pwm, right_motor_pwm
+
+    def adjust_pwm_value(self, pwm):
+        """PWM値が-0.05から0.05の間にある場合、0に調整する"""
+        if -0.05 <= pwm <= 0.05:
+            return 0
+        return pwm
 
     def manual_control(self):
         self.led.off()
         # Read the joystick position data
-        vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val * 2 - 1  # normalize to [-1, 1]
-        vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val * 2 - 1  
+        vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val_x * 2 - 1  # normalize to [-1, 1]
+        vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val_y * 2 - 1  
         # Debugging
         print(f"Normalized X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
-        self.motor_r.forward(0.2)
-        self.motor_l.forward(0.2)
+        left_pwm, right_pwm = self.calc_motor_command(vrx_pos, vry_pos)
+        left_pwm = self.adjust_pwm_value(left_pwm)
+        right_pwm = self.adjust_pwm_value(right_pwm)
+        # print(f"left pwm : {left_pwm:.2f}, right pwm : {right_pwm:.2f}")
+        if right_pwm > 0:
+            self.motor_r.forward(right_pwm)
+        else:
+            self.motor_r.backward(abs(right_pwm)) 
+        if left_pwm > 0:
+            self.motor_l.forward(left_pwm)
+        else:
+            self.motor_l.backward(abs(left_pwm)) 
         return
     
     def follow_control(self):

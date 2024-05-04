@@ -3,7 +3,6 @@
 import time
 import sys
 sys.path.append("..")
-from tang_control.tang_control.config import Pin
 from gpiozero import PhaseEnableMotor
 
 motor = PhaseEnableMotor(phase=18, enable=12)

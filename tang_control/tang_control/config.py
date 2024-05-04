@@ -55,7 +55,9 @@ class Control:
     max_angular_vel = 1.0
     max_linear_vel_manual = 0.8
     max_angular_vel_manual = 0.8
-    max_joystick_val = 1023.0
+    max_duty = 0.2
+    max_joystick_val_y = 1023.0
+    max_joystick_val_x = 1023.0
     velocity_thresh = 1e-2
     # 入力電圧
     input_v = 27
