@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'tang_control = tang_control.tang_control:main'
         ],
     },
 )

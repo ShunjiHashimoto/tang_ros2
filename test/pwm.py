@@ -4,16 +4,22 @@ import time
 import sys
 sys.path.append("..")
 from tang_control.tang_control.config import Pin
-from gpiozero import PWMOutputDevice
+from gpiozero import PhaseEnableMotor
 
-motor_pin = PWMOutputDevice(Pin.pwm_r)
+motor = PhaseEnableMotor(phase=18, enable=12)
 try:
-    while True:
-        motor_pin.value = 0.0
-        time.sleep(1.0)
-        motor_pin.value = 0.5
-        time.sleep(1.0)
-        motor_pin.value = 0.8
-        time.sleep(1.0)
-finally:
-    motor_pin.close()
+    motor.forward(0.2)
+    print(f"motor run")
+    time.sleep(10.0)
+    print(f"motor stop")
+    time.sleep(1.0)
+    motor.stop()
+    print("stop")
+    time.sleep(3.0)
+    #motor.backward(0.3)
+    #print("back")
+    #time.sleep(3.0)
+    motor.close()
+except:
+    motor.stop()
+    motor.close()

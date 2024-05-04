@@ -3,10 +3,9 @@
 import time
 import sys
 sys.path.append("..")
-from tang_control.tang_control.config import Pin
 from gpiozero import LED
 
-led = LED(Pin.led)
+led = LED(26)
 try:
     while True:
         led.on()

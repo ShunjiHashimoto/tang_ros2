@@ -9,7 +9,7 @@ from gpiozero import Button
 def do_stuff():
     print("Button Pressed")
     
-button = Button(Pin.teleop_mode)
+button = Button(Pin.follow_mode)
 button.when_pressed = do_stuff
 
 while True:

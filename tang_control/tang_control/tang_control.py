@@ -18,30 +18,74 @@
 
 import rclpy
 from rclpy.node import Node
-from config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
-# import pigpio
+from rclpy.logging import get_logger
 
+from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
+from gpiozero import Button, PhaseEnableMotor, LED
+import spidev
+
+try: 
+    spi = spidev.SpiDev()
+    spi.open(0,0)
+    spi.max_speed_hz = 100000 
+except:
+    print("error: failed to open spi")
+    
 class TangController(Node):
     def __init__(self):
         super().__init__('tang_control')
+        self.logger = get_logger('tang_control_logger')
+        self.logger.info('TangController initialized')
+        self.button_follow = Button(Pin.follow_mode)
+        self.button_follow.when_pressed = self.switch_on_callback_follow
+        self.button_manual = Button(Pin.manual_mode)
+        self.button_manual.when_pressed = self.switch_on_callback_manual
+        self.motor_l = PhaseEnableMotor(phase=17, enable=12)
+        self.motor_r = PhaseEnableMotor(phase=18, enable=13)
+        self.mode = None
+        self.led = LED(Pin.led_follow)
     
+    def switch_on_callback_follow(self):
+        self.mode = "follow"
+        self.logger.info("追従モード")
+
+    def switch_on_callback_manual(self):
+        self.mode = "manual"
+        self.logger.info("手動操作")
+    
+    def read_analog_pin(self, channel):
+        adc = spi.xfer2([1, (8 + channel)<<4, 0])
+        data = ((adc[1]&3) << 8) + adc[2]
+        return data
+
+    def manual_control(self):
+        self.led.off()
+        # Read the joystick position data
+        vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val * 2 - 1  # normalize to [-1, 1]
+        vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val * 2 - 1  
+        # Debugging
+        print(f"Normalized X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
+        self.motor_r.forward(0.2)
+        self.motor_l.forward(0.2)
+        return
+    
+    def follow_control(self):
+        self.led.blink(on_time=1, off_time=1)
+        return
+
     def start(self):
-        if self.pi.read(Pin.emergency_mode): 
-            print(f"緊急停止モード")
-            return
-        elif self.tang_teleop.mode == 0:
-            print(f"遠隔操作")
-            self.teleop_control()
-        elif self.tang_teleop.mode == 1:
-            print(f"追従モード")
-            self.follow_control()
-        self.prev_mode = self.tang_teleop.mode 
-        return 
+        while(True):
+            if self.mode == "emergency": 
+                self.logger.info("緊急停止")
+            elif self.mode == "follow":
+                self.follow_control()
+            else:
+                self.manual_control()
 
 def main():
     rclpy.init()
     node = TangController()
-    rclpy.spin(node)
+    node.start()
     node.destroy_node()
     rclpy.shutdown()
                 

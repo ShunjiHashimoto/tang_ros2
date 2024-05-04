@@ -11,13 +11,13 @@ class Pin:
     encoder_r_B  = 6
     direction_r  = 18
     pwm_r        = 13
-    teleop_mode  = 16
+    manual_mode  = 16
     follow_mode  = 21
     vrx_channel  = 0
     vry_channel  = 1
     swt_channel  = 2
-    # 25
-    led = 25 # or 26
+    led_follow = 25
+    led = 26
     emergency_mode = 11
 
 class FOLLOWPID:
