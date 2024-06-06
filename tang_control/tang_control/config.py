@@ -3,12 +3,12 @@
 import math
 
 class Pin:
-    encoder_l_A  = 22
-    encoder_l_B  = 27
+    encoder_l_A  = 5
+    encoder_l_B  = 6
     direction_l  = 17
     pwm_l        = 12
-    encoder_r_A  = 5
-    encoder_r_B  = 6
+    encoder_r_A  = 22
+    encoder_r_B  = 27
     direction_r  = 18
     pwm_r        = 13
     manual_mode  = 16
@@ -40,7 +40,7 @@ class PID:
 class PWM:
     # PWM周波数をHzで指定
     freq = 1000 # [Hz]
-    max_duty = 50
+    max_duty = 0.4
 
 class Fig:
     time_data  = []
@@ -59,7 +59,7 @@ class Control:
     max_joystick_val = 1023.0
     velocity_thresh = 1e-2
     # 入力電圧
-    input_v = 27
+    input_v = 24
     # 目標角速度
     w_target = 0.0001
     # 目標速度
@@ -79,8 +79,8 @@ class Control:
     # 巻線抵抗
     R = 3.05931
     # モータ１回転あたりのエンコーダ値
-    encoder_1rotation_r = 2030
-    encoder_1rotation_l = 2030
+    encoder_1rotation_r = 2030*2
+    encoder_1rotation_l = 2020*2
     # エンコーダ値1あたりの回転角度[rad]
     radian_1encoder_r = 2*math.pi/encoder_1rotation_r
     radian_1encoder_l = 2*math.pi/encoder_1rotation_l
