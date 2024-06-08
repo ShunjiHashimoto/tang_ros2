@@ -6,7 +6,7 @@ from datetime import datetime
 from gpiozero import Button, PhaseEnableMotor
 import sys
 import matplotlib.pyplot as plt
-from config import Pin, PID, PWM, Fig, Control
+from tang_control.config import Pin, PID, PWM, Fig, Control
 
 class Motor:
     def __init__(self):
@@ -66,7 +66,7 @@ class Motor:
     def pid_control(self, v_curr, w_curr, v_target, w_target, dt):
         error_v  = v_target - v_curr
         error_w  = w_target - w_curr
-        if(error_v < 0): error_v = -error_v
+        # if(error_v < 0): error_v = -error_v
         pid_error_v = PID.Kp_v*error_v + PID.Ki_v*self.error_sum['v'] + PID.Kd_v*(error_v - self.prev_error['v'])/dt
         pid_error_w = PID.Kp_w*error_w + PID.Ki_w*self.error_sum['w'] + PID.Kd_w*(error_w - self.prev_error['w'])/dt
         # print(f"\033[91merror_v: {error_v:.3f}, 目標速度：{v_target}, 現在速度：{v_curr}, 計算後のerror_v: {pid_error_v:.3f}, error_sum_v: {self.error_sum['v']:.3f}, error_sum_w: {self.error_sum['w']:.3f}\033[0m")

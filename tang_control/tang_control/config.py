@@ -51,12 +51,15 @@ class Fig:
     target_a_data = []
 
 class Control:
+    # 最大速度
     max_linear_vel = 0.3
     max_angular_vel = 1.0
     max_linear_vel_manual = 0.8
     max_angular_vel_manual = 0.8
+    # duty比の最大値
     max_duty = 0.2
-    max_joystick_val = 1023.0
+    # joystickの最大値
+    max_joystick_val = 1000.0
     velocity_thresh = 1e-2
     # 入力電圧
     input_v = 26.1
