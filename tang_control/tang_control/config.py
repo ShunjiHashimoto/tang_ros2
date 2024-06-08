@@ -33,7 +33,7 @@ class PID:
     Kp_w = 0.5
     Ki_w = 0.001
     Kd_w = 0.00
-    max_error_sum_w = 50
+    max_error_sum_w = 80
     max_error_sum_v = 10
     dt = 0.005 # 0.0001がmax
 
@@ -59,7 +59,7 @@ class Control:
     max_joystick_val = 1023.0
     velocity_thresh = 1e-2
     # 入力電圧
-    input_v = 24
+    input_v = 26.1
     # 目標角速度
     w_target = 0.0001
     # 目標速度

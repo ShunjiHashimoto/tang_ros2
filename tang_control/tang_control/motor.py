@@ -169,7 +169,6 @@ class Motor:
         self.fig.tight_layout()
         now = datetime.now().replace(microsecond=0)
         plt.savefig(f"/root/ros2_ws/src/tang_ros2/tang_control/tang_control/log/{now}_v={Control.v_target}_a={Control.a_target}_w={Control.w_target}_α={Control.alpha_target}.png")
-            
 
 def main():
     # 目標速度
