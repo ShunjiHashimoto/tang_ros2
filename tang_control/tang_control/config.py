@@ -5,12 +5,12 @@ import math
 class Pin:
     encoder_l_A  = 5
     encoder_l_B  = 6
-    direction_l  = 17
-    pwm_l        = 12
-    encoder_r_A  = 22
-    encoder_r_B  = 27
-    direction_r  = 18
-    pwm_r        = 13
+    pwm_l            = 12 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
+    direction_l_FWD  = 17 # DIG1（コネクタ番号①）, 0.0~5.0V
+    direction_l_REV  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    pwm_r            = 13 # AN2（コネクタ番号②）
+    direction_r_FWD  = 18 # DIG2（コネクタ番号②）, 0.0~5.0V
+    direction_r_REV  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
     manual_mode  = 16
     follow_mode  = 21
     vrx_channel  = 0
@@ -19,6 +19,8 @@ class Pin:
     led_follow = 25
     led = 26
     emergency_mode = 11
+    # encoder_r_A  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    # encoder_r_B  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
 
 class FOLLOWPID:
     p_gain = 2.307

@@ -68,13 +68,30 @@ class TangController(Node):
         data = ((adc[1]&3) << 8) + adc[2]
         return data
     
-    def normalize_joystick_input(self, value, max_value):
+    def normalize_joystick_input(self, value, max_value=Control.max_duty):
         return value*max_value
     
-    def calc_motor_command(self, joystick_x, joystick_y):
-        velocity = self.normalize_joystick_input(joystick_y, Control.max_linear_vel)
-        angular_velocity = self.normalize_joystick_input(joystick_x, Control.max_angular_vel)
-        return velocity, angular_velocity
+    def calc_motor_command_pwm(self, joystick_x, joystick_y):
+        x = self.normalize_joystick_input(joystick_x)
+        y = self.normalize_joystick_input(joystick_y)
+        if(y > 0):
+            if(x > 0):
+                right_motor_pwm = y 
+                left_motor_pwm = ((Control.max_duty - x)/Control.max_duty) * y
+            if(x <= 0):
+                right_motor_pwm = ((Control.max_duty + x)/Control.max_duty) * y
+                left_motor_pwm = y
+        elif(y <= 0):
+            if(x > 0):
+                right_motor_pwm = y 
+                left_motor_pwm = -abs(((Control.max_duty - x)/Control.max_duty) * y)
+            if(x <= 0):
+                left_motor_pwm =  y
+                right_motor_pwm = -abs(((Control.max_duty + x)/Control.max_duty) * y)
+        print(f"right; {right_motor_pwm:.2f} ; left: {left_motor_pwm:.2f}")
+        left_motor_pwm = max(min(left_motor_pwm, Control.max_duty), -Control.max_duty)
+        right_motor_pwm = max(min(right_motor_pwm, Control.max_duty), -Control.max_duty)
+        return left_motor_pwm, right_motor_pwm
 
     def adjust_pwm_value(self, vel):
         """PWM値が-0.05から0.05の間にある場合、0に調整する"""
@@ -85,16 +102,29 @@ class TangController(Node):
     def manual_control(self):
         self.led.off()
         # Read the joystick position data
-        center =  Control.max_joystick_val/2
-        vrx_pos = (self.read_analog_pin(Pin.vrx_channel) - center)/(Control.max_joystick_val - center)  # normalize to [-1, 1]
-        vry_pos = (self.read_analog_pin(Pin.vry_channel) - center) / (Control.max_joystick_val - center)   
+        vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
+        vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
         # Debugging
         print(f"Normalized X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
-        vel, ang_vel = self.calc_motor_command(vrx_pos, vry_pos)
-        # vel = self.adjust_pwm_value(vel)
-        self.motor.run(vel, ang_vel, a_target=Control.a_target, alpha_target=Control.alpha_target)
-        # right_pwm = self.adjust_pwm_value(right_pwm)
-        print(f"vel : {vel:.2f}, ang_vel : {ang_vel:.2f}")
+        left_pwm, right_pwm = self.calc_motor_command_pwm(vrx_pos, vry_pos)
+        left_pwm  = self.adjust_pwm_value(left_pwm)
+        right_pwm = self.adjust_pwm_value(right_pwm)
+        if right_pwm > 0:
+            self.motor.r_FWD.on()
+            self.motor.r_REV.off()
+            self.motor.motor_r.value = right_pwm
+        else:
+            self.motor.r_FWD.off()
+            self.motor.r_REV.on()
+            self.motor.motor_r.value= (abs(right_pwm)) 
+        if left_pwm > 0:
+            self.motor.l_FWD.on()
+            self.motor.l_REV.off()
+            self.motor.motor_l.value = (left_pwm)
+        else:
+            self.motor.l_FWD.off()
+            self.motor.l_REV.on()
+            self.motor.motor_l.value = (abs(left_pwm)) 
         return
     
     def calculate_speed(self, x, y, max_vel=Control.max_linear_vel, max_angular_vel=Control.max_angular_vel):

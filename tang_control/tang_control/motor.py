@@ -3,58 +3,29 @@
 
 import time
 from datetime import datetime
-from gpiozero import Button, PhaseEnableMotor
+from gpiozero import Button, PhaseEnableMotor, LED, PWMLED
 import sys
 import matplotlib.pyplot as plt
 from tang_control.config import Pin, PID, PWM, Fig, Control
 
 class Motor:
     def __init__(self):
-        self.last_gpio_r = Pin.encoder_r_A
-        self.last_gpio_l = Pin.encoder_l_A
-        self.encoder_values = {'r' : 0, 'l' : 0}
-        self.prev_encoder_values = {'r' : 0, 'l' : 0}
         self.prev_error = {'v' : 0, 'w' : 0}
         self.error_sum = {'v' : 0, 'w' : 0}
         self.prev_time = time.time()
         self.prev_time_for_pwm = time.time()
         self.start_time = datetime.now()
-        self.motor_r = PhaseEnableMotor(phase=Pin.direction_r, enable=Pin.pwm_r)
-        self.motor_l = PhaseEnableMotor(phase=Pin.direction_l, enable=Pin.pwm_l)
-        # encoder
-        self.encoder_r_A = Button(Pin.encoder_r_A)
-        self.encoder_r_B = Button(Pin.encoder_r_B)
-        self.encoder_r_A.when_pressed = self.encoder_r_A_callback
-        self.encoder_r_B.when_pressed = self.encoder_r_B_callback
-        self.encoder_l_A = Button(Pin.encoder_l_A)
-        self.encoder_l_B = Button(Pin.encoder_l_B)
-        self.encoder_l_A.when_pressed = self.encoder_l_A_callback
-        self.encoder_l_B.when_pressed = self.encoder_l_B_callback
+        self.motor_r = PWMLED(Pin.pwm_r)
+        self.motor_l = PWMLED(Pin.pwm_l)
+        self.r_FWD = LED(Pin.direction_r_FWD)
+        self.r_REV = LED(Pin.direction_r_REV)
+        self.l_FWD = LED(Pin.direction_l_FWD)
+        self.l_REV = LED(Pin.direction_l_REV)
         # プロット
         self.fig = plt.figure()
         self.ax1 = self.fig.add_subplot(1, 2, 1)
         self.ax2 = self.fig.add_subplot(1, 2, 2)
     
-    def encoder_r_A_callback(self):
-        if self.last_gpio_r == Pin.encoder_r_B:
-            self.encoder_values['r'] += 1
-            self.last_gpio_r = Pin.encoder_r_A
-
-    def encoder_r_B_callback(self):
-        if self.last_gpio_r == Pin.encoder_r_A:
-            self.encoder_values['r'] += 1
-            self.last_gpio_r = Pin.encoder_r_B
-    
-    def encoder_l_A_callback(self):
-        if self.last_gpio_l == Pin.encoder_l_B:
-            self.encoder_values['l'] += 1
-            self.last_gpio_l = Pin.encoder_l_A
-
-    def encoder_l_B_callback(self):
-        if self.last_gpio_l == Pin.encoder_l_A:
-            self.encoder_values['l'] += 1
-            self.last_gpio_l = Pin.encoder_l_B
-
     def calculate_duty_cycle(self, duty):
         # 1,000,000で100％
         return int(((duty/100) * 1000000))
