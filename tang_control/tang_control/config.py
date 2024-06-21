@@ -4,11 +4,15 @@ import math
 
 class Pin:
     pwm_l            = 12 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
-    direction_l_FWD  = 17 # DIG1（コネクタ番号①）, 0.0~5.0V
-    direction_l_REV  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    # direction_l_FWD  = 17 # DIG1（コネクタ番号①）, 0.0~5.0V
+    # direction_l_REV  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    direction_l_FWD  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    direction_l_REV  = 17 # DIG1（コネクタ番号①）, 0.0~5.0V
+
     pwm_r            = 13 # AN2（コネクタ番号②）,0.0 ~ 0.9V
     direction_r_FWD  = 18 # DIG2（コネクタ番号②）, 0.0~5.0V
     direction_r_REV  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
+    
     encoder_l_A  = 5
     encoder_l_B  = 6
     manual_mode  = 16
