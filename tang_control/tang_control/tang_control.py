@@ -52,7 +52,6 @@ class TangController(Node):
         print(f"person x: {msg.pose.position.x}, y: {msg.pose.position.y}", flush=True)
         self.follow_target_person = msg
         # -1.2 ~ 1.2 でyは変わる、またxも0 ~ 1.2で変わる
-        # pwmは0.3をmaxとする
        
     # モード切替 
     def switch_on_callback_follow(self):
@@ -70,47 +69,46 @@ class TangController(Node):
         return data
     
     # pwmを使った手動操作
-    def manual_control_with_pwm(self):
+    def manual_pwm_control(self):
         # Read the joystick position data
         vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
         vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
-        # Debugging
-        print(f"Normalized X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
-        duty_r, duty_l = self.motor.calc_motor_command_pwm(vrx_pos, vry_pos)
+        print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
+        duty_r, duty_l = self.motor.calc_duty_by_joyinput(vrx_pos, vry_pos)
         print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
         self.motor.run(duty_r, duty_l)
         return
     
     # 速度制御を使った手動操作
-    def manual_control_with_vel(self):
+    def manual_vel_control(self):
         center =  Control.max_joystick_val/2
         vrx_pos = (self.read_analog_pin(Pin.vrx_channel) - center) / (Control.max_joystick_val - center)  # normalize to [-1, 1]
         vry_pos = (self.read_analog_pin(Pin.vry_channel) - center) / (Control.max_joystick_val - center)  
-        print(f"Normalized X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
-        v_target, w_target = self.motor.calc_motor_command_vel(vrx_pos, vry_pos)
-        print(f"v_target : {v_target:.2f}, w_target : {w_target:.2f}")
-        duty_r, duty_l = self.motor.calc_duty_brushless(v_target, w_target)
+        print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
+        target_v, target_w = self.motor.calc_robot_vel_command(vrx_pos, vry_pos)
+        print(f"target_v : {target_v:.2f}, target_w : {target_w:.2f}")
+        duty_r, duty_l = self.motor.calc_duty_by_vw(target_v, target_w)
         print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
         self.motor.run(duty_r, duty_l)
         return
     
     # 追従操作
-    def calculate_speed(self, x, y, max_vel=Control.max_linear_vel, max_angular_vel=Control.max_angular_vel):
+    def calc_vw_by_humanpos(self, x, y, max_target_v=Control.max_target_v, max_target_w=Control.max_target_w):
         # x座標を0 ~ 1.2の範囲にクリッピング
         x = max(0, min(x, 1.2))
         # y座標を-1.2 ~ 1.2の範囲にクリッピング
         y = max(-1.2, min(y, 1.2))
         # 前後方向の速度 (x 座標に基づく)
-        forward_speed = x / 1.2 * max_vel
+        target_v = x / 1.2 * max_target_v
         # 左右方向の速度 (y 座標に基づく)
-        turn_speed = y / 1.2 * max_angular_vel
-        return forward_speed, turn_speed
+        target_w = y / 1.2 * max_target_w
+        return target_v, target_w
 
     def follow_control(self):
-        v_target, w_target = self.calculate_speed(self.follow_target_person.pose.position.x-0.15, self.follow_target_person.pose.position.y)
-        print(f"v_target : {v_target:.2f}, w_target : {w_target:.2f}")
+        target_v, target_w = self.calc_vw_by_humanpos(self.follow_target_person.pose.position.x-0.15, self.follow_target_person.pose.position.y)
+        print(f"target_v : {target_v:.2f}, target_w : {target_w:.2f}")
         if hasattr(self, 'follow_target_person') and self.follow_target_person is not None:
-            duty_r, duty_l = self.motor.calc_duty_brushless(v_target, w_target)
+            duty_r, duty_l = self.motor.calc_duty_by_vw(target_v, target_w)
             print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
             self.motor.run(duty_r, duty_l)
         else:
@@ -124,8 +122,8 @@ class TangController(Node):
             elif self.mode == "follow":
                 self.follow_control()
             elif self.mode == "manual":
-                self.manual_control_with_pwm()
-                # self.manual_control_with_vel()
+                self.manual_pwm_control()
+                # self.manual_vel_control()
             else:
                 print("Something wrong, Please check curretn mode")
             rclpy.spin_once(self, timeout_sec=0.1)

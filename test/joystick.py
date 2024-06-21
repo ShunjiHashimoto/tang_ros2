@@ -22,8 +22,8 @@ def manual_control():
     # Debugging
     print(f"Normalized X : {vrx_pos}, Normalized Y : {vry_pos}")
     # Calculate linear and angular velocity
-    linear_velocity = Control.max_linear_vel * max(vry_pos, 0)  # vry_pos negative would mean backward, but we restrict that
-    angular_velocity = vrx_pos * Control.max_angular_vel
+    linear_velocity = Control.max_target_v * max(vry_pos, 0)  # vry_pos negative would mean backward, but we restrict that
+    angular_velocity = vrx_pos * Control.max_target_w
     # Set velocities to zero if they are below the threshold
     if abs(linear_velocity) < Control.velocity_thresh:
         linear_velocity = 0

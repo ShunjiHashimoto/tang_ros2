@@ -5,57 +5,55 @@ import time
 import math
 from datetime import datetime
 from gpiozero import LED, PWMOutputDevice
-import sys
-from tang_control.config import Pin, PID, PWM, Fig, Control
+from tang_control.config import Pin, PID, PWM, Control
 
 class Motor:
     def __init__(self):
-        self.r_pwm = PWMOutputDevice(Pin.pwm_r, frequency = 500)
-        self.l_pwm = PWMOutputDevice(Pin.pwm_l, frequency = 500)
+        self.r_pwm = PWMOutputDevice(Pin.pwm_r, frequency=PWM.frequency)
+        self.l_pwm = PWMOutputDevice(Pin.pwm_l, frequency=PWM.frequency)
         self.r_FWD = LED(Pin.direction_r_FWD)
         self.r_REV = LED(Pin.direction_r_REV)
         self.l_FWD = LED(Pin.direction_l_FWD)
         self.l_REV = LED(Pin.direction_l_REV)
     
-    def normalize_joystick_input(self, value, max_value=Control.max_duty):
+    def normalize_joystick_input(self, value, max_value=PWM.max_duty):
         return value*max_value
     
-    def calc_motor_command_pwm(self, joystick_x, joystick_y):
+    def calc_duty_by_joyinput(self, joystick_x, joystick_y):
         x = self.normalize_joystick_input(joystick_x)
         y = self.normalize_joystick_input(joystick_y)
         if(y > 0):
             if(x > 0):
-                right_motor_pwm = y 
-                left_motor_pwm = ((Control.max_duty - x)/Control.max_duty) * y
+                duty_r = y 
+                duty_l = ((PWM.max_duty - x)/PWM.max_duty)*y
             if(x <= 0):
-                right_motor_pwm = ((Control.max_duty + x)/Control.max_duty) * y
-                left_motor_pwm = y
+                duty_r = ((PWM.max_duty + x)/PWM.max_duty)*y
+                duty_l = y
         elif(y <= 0):
             if(x > 0):
-                right_motor_pwm = y 
-                left_motor_pwm = -abs(((Control.max_duty - x)/Control.max_duty) * y)
+                duty_r = y 
+                duty_l = -abs(((PWM.max_duty - x)/PWM.max_duty)*y)
             if(x <= 0):
-                left_motor_pwm =  y
-                right_motor_pwm = -abs(((Control.max_duty + x)/Control.max_duty) * y)
-        print(f"right; {right_motor_pwm:.2f} ; left: {left_motor_pwm:.2f}")
-        left_motor_pwm = max(min(left_motor_pwm, Control.max_duty), -Control.max_duty)
-        right_motor_pwm = max(min(right_motor_pwm, Control.max_duty), -Control.max_duty)
-        return right_motor_pwm, left_motor_pwm
+                duty_l =  y
+                duty_r = -abs(((PWM.max_duty + x)/PWM.max_duty)*y)
+        duty_l = max(min(duty_l, PWM.max_duty), -PWM.max_duty)
+        duty_r = max(min(duty_r, PWM.max_duty), -PWM.max_duty)
+        return duty_r, duty_l
 
-    def calc_motor_command_vel(self, joystick_x, joystick_y):
-        linear_velocity = self.normalize_joystick_input(joystick_y, Control.max_linear_vel)
-        angular_velocity = self.normalize_joystick_input(joystick_x, Control.max_angular_vel)
-        return linear_velocity, angular_velocity
+    def calc_robot_vel_command(self, joystick_x, joystick_y):
+        target_v = self.normalize_joystick_input(joystick_y, Control.max_target_v)
+        target_w = self.normalize_joystick_input(joystick_x, Control.max_target_w)
+        return target_v, target_w
     
-    def calc_motor_speed(self, v_target, w_target):
-        vel_r = v_target + w_target * Control.tread_w/2
-        vel_l = v_target - w_target * Control.tread_w/2
+    def calc_motor_speed(self, target_v, target_w):
+        vel_r = target_v + target_w * Control.tread_width/2
+        vel_l = target_v - target_w * Control.tread_width/2
         rotation_speed_r = (vel_r/Control.wheel_r)*Control.gear_ratio*60/(2*math.pi)
         rotation_speed_l = (vel_l/Control.wheel_r)*Control.gear_ratio*60/(2*math.pi)
         return rotation_speed_r, rotation_speed_l
     
-    def calc_duty_brushless(self, v_target, w_target):
-        rotation_speed_r, rotation_speed_l = self.calc_motor_speed(v_target, w_target)
+    def calc_duty_by_vw(self, target_v, target_w):
+        rotation_speed_r, rotation_speed_l = self.calc_motor_speed(target_v, target_w)
         volt_r = Control.volt_and_rpm_gain*rotation_speed_r
         volt_l = Control.volt_and_rpm_gain*rotation_speed_l
         duty_r = volt_r/Control.src_volt
@@ -89,13 +87,14 @@ class Motor:
         self.l_pwm.value = 0.0
         self.l_FWD.off()
         self.l_REV.off()
+        return
 
     def run(self, duty_r, duty_l):
-        if(abs(duty_r) > Control.max_duty or abs(duty_l > Control.max_duty)): 
-            print(f"over duty, r,l = {duty_r}, {duty_l}")
+        if(abs(duty_r) > PWM.max_duty or abs(duty_l > PWM.max_duty)): 
+            print(f"pwm control skipped, because over duty, r,l = {duty_r}, {duty_l}")
             return
-        if abs(duty_r) < Control.min_duty and abs(duty_l) < Control.min_duty:
-            print(f"pwm control stop")
+        if abs(duty_r) < PWM.min_duty and abs(duty_l) < PWM.min_duty:
+            print(f"pwm control stop because low duty")
             self.pwm_control_stop()
             return
         if duty_r > 0:
@@ -114,12 +113,12 @@ class Motor:
 
 def main():
     # 目標速度
-    v_target = 0.1
+    target_v = 0.1
     # 目標角速度
-    w_target = 0.3
+    target_w = 0.3
     motor = Motor()
     while(1):
-        duty_r, duty_l = motor.calc_duty_brushless(v_target, w_target)
+        duty_r, duty_l = motor.calc_duty_by_vw(target_v, target_w)
         motor.run(duty_r, duty_l)
     
 if __name__ == "__main__":

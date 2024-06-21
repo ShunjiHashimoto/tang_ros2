@@ -3,14 +3,14 @@
 import math
 
 class Pin:
-    encoder_l_A  = 5
-    encoder_l_B  = 6
     pwm_l            = 12 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
     direction_l_FWD  = 17 # DIG1（コネクタ番号①）, 0.0~5.0V
     direction_l_REV  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
     pwm_r            = 13 # AN2（コネクタ番号②）,0.0 ~ 0.9V
     direction_r_FWD  = 18 # DIG2（コネクタ番号②）, 0.0~5.0V
     direction_r_REV  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
+    encoder_l_A  = 5
+    encoder_l_B  = 6
     manual_mode  = 16
     follow_mode  = 21
     vrx_channel  = 0
@@ -41,8 +41,9 @@ class PID:
 
 class PWM:
     # PWM周波数をHzで指定
-    freq = 1000 # [Hz]
-    max_duty = 0.4
+    frequency = 1000 # [Hz]
+    max_duty = 0.2
+    min_duty = 0.05
 
 class Fig:
     time_data  = []
@@ -54,22 +55,17 @@ class Fig:
 
 class Control:
     # 最大速度
-    max_linear_vel = 2.0
-    max_angular_vel = 1.0
-    max_linear_vel_manual = 0.8
-    max_angular_vel_manual = 0.8
-    # duty比の最大値
-    max_duty = 0.2
-    min_duty = 0.05
+    max_target_v = 2.0
+    max_target_w = 1.0
     # joystickの最大値
     max_joystick_val = 1000.0
     velocity_thresh = 1e-2
     # 入力電圧
     input_v = 26.1
     # 目標角速度
-    w_target = 0.0001
+    target_w = 0.0001
     # 目標速度
-    v_target = 0.3
+    target_v = 0.3
     # 目標加速度
     a_target = 0.1
     # 目標角加速度
@@ -93,7 +89,7 @@ class Control:
     # モータの回転数
     rotation_num = 2
     # トレッド幅[m]
-    tread_w = 0.356
+    tread_width = 0.356
     # 車輪半径[m]
     wheel_r = 0.05
     # 車体質量
