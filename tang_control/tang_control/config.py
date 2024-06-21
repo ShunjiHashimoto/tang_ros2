@@ -60,6 +60,7 @@ class Control:
     max_angular_vel_manual = 0.8
     # duty比の最大値
     max_duty = 0.2
+    min_duty = 0.05
     # joystickの最大値
     max_joystick_val = 1000.0
     velocity_thresh = 1e-2
@@ -100,8 +101,13 @@ class Control:
     # 車体慣性モーメント J = ml^2
     # J = 1/3(a^2 + b^2) 44cm, 40cm = 0.58999
     J = M*(0.22*0.22 + 0.2*0.2)/3
-    # ギア比
+    # CuGoV3のギア比
     gear_ratio = 1.0
+    # ブラシレスモータの電圧とモータ回転数[rpm]の関係, 4.5Vで4000[r/min]よりy = 4.5/4000x = 0.001125x
+    volt_and_rpm_gain = 0.001125
+    # デューティ比計算に用いる直流電圧
+    src_volt = 5.0
+    
 
 class HumanFollowParam:
     depth_min_thresh = 0.5
