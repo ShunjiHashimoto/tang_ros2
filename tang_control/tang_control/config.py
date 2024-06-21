@@ -8,7 +8,7 @@ class Pin:
     pwm_l            = 12 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
     direction_l_FWD  = 17 # DIG1（コネクタ番号①）, 0.0~5.0V
     direction_l_REV  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
-    pwm_r            = 13 # AN2（コネクタ番号②）
+    pwm_r            = 13 # AN2（コネクタ番号②）,0.0 ~ 0.9V
     direction_r_FWD  = 18 # DIG2（コネクタ番号②）, 0.0~5.0V
     direction_r_REV  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
     manual_mode  = 16
@@ -54,7 +54,7 @@ class Fig:
 
 class Control:
     # 最大速度
-    max_linear_vel = 0.3
+    max_linear_vel = 2.0
     max_angular_vel = 1.0
     max_linear_vel_manual = 0.8
     max_angular_vel_manual = 0.8
@@ -92,7 +92,7 @@ class Control:
     # モータの回転数
     rotation_num = 2
     # トレッド幅[m]
-    tread_w = 0.32
+    tread_w = 0.356
     # 車輪半径[m]
     wheel_r = 0.05
     # 車体質量
@@ -100,6 +100,8 @@ class Control:
     # 車体慣性モーメント J = ml^2
     # J = 1/3(a^2 + b^2) 44cm, 40cm = 0.58999
     J = M*(0.22*0.22 + 0.2*0.2)/3
+    # ギア比
+    gear_ratio = 1.0
 
 class HumanFollowParam:
     depth_min_thresh = 0.5

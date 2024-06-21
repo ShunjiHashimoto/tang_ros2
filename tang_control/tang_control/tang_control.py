@@ -23,7 +23,7 @@ from rclpy.logging import get_logger
 from leg_tracker_ros2.msg import Person 
 from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
 from tang_control.motor import Motor
-from gpiozero import Button, PhaseEnableMotor, LED
+from gpiozero import Button, LED 
 import spidev
 
 try: 
@@ -54,7 +54,8 @@ class TangController(Node):
         self.follow_target_person = msg
         # -1.2 ~ 1.2 でyは変わる、またxも0 ~ 1.2で変わる
         # pwmは0.3をmaxとする
-        
+       
+    # モード切替 
     def switch_on_callback_follow(self):
         self.mode = "follow"
         self.logger.info("追従モード")
@@ -63,11 +64,14 @@ class TangController(Node):
         self.mode = "manual"
         self.logger.info("手動操作")
     
+    # joystick信号の取得
     def read_analog_pin(self, channel):
         adc = spi.xfer2([1, (8 + channel)<<4, 0])
         data = ((adc[1]&3) << 8) + adc[2]
         return data
     
+    
+    # PWM制御を使ったモータ制御
     def normalize_joystick_input(self, value, max_value=Control.max_duty):
         return value*max_value
     
@@ -91,42 +95,53 @@ class TangController(Node):
         print(f"right; {right_motor_pwm:.2f} ; left: {left_motor_pwm:.2f}")
         left_motor_pwm = max(min(left_motor_pwm, Control.max_duty), -Control.max_duty)
         right_motor_pwm = max(min(right_motor_pwm, Control.max_duty), -Control.max_duty)
-        return left_motor_pwm, right_motor_pwm
+        return right_motor_pwm, left_motor_pwm
 
     def adjust_pwm_value(self, vel):
         """PWM値が-0.05から0.05の間にある場合、0に調整する"""
         if -0.001 <= vel <= 0.001:
             return 0.05
         return vel
-
-    def manual_control(self):
-        self.led.off()
+    
+    # pwmを使った手動操作
+    def manual_control_with_pwm(self):
         # Read the joystick position data
         vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
         vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
         # Debugging
         print(f"Normalized X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
-        left_pwm, right_pwm = self.calc_motor_command_pwm(vrx_pos, vry_pos)
-        left_pwm  = self.adjust_pwm_value(left_pwm)
-        right_pwm = self.adjust_pwm_value(right_pwm)
-        if right_pwm > 0:
-            self.motor.r_FWD.on()
-            self.motor.r_REV.off()
-            self.motor.motor_r.value = right_pwm
-        else:
-            self.motor.r_FWD.off()
-            self.motor.r_REV.on()
-            self.motor.motor_r.value= (abs(right_pwm)) 
-        if left_pwm > 0:
-            self.motor.l_FWD.on()
-            self.motor.l_REV.off()
-            self.motor.motor_l.value = (left_pwm)
-        else:
-            self.motor.l_FWD.off()
-            self.motor.l_REV.on()
-            self.motor.motor_l.value = (abs(left_pwm)) 
+        duty_r, duty_l = self.calc_motor_command_pwm(vrx_pos, vry_pos)
+        duty_l  = self.adjust_pwm_value(duty_l)
+        duty_r = self.adjust_pwm_value(duty_r)
+        print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
+        self.motor.run(duty_r, duty_l)
         return
     
+    
+    # 速度制御を使ったモータ制御
+    def calc_motor_command_vel(self, joystick_x, joystick_y):
+        linear_velocity = self.normalize_joystick_input(joystick_y, Control.max_linear_vel)
+        angular_velocity = self.normalize_joystick_input(joystick_x, Control.max_angular_vel)
+        return linear_velocity, angular_velocity
+    
+    # 速度制御を使った手動操作
+    def manual_control_with_vel(self):
+        # Read the joystick position data
+        center =  Control.max_joystick_val/2
+        vrx_pos = (self.read_analog_pin(Pin.vrx_channel) - center) / (Control.max_joystick_val - center)  # normalize to [-1, 1]
+        vry_pos = (self.read_analog_pin(Pin.vry_channel) - center) / (Control.max_joystick_val - center)  
+        # Debugging
+        print(f"Normalized X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
+        v_target, w_target = self.calc_motor_command_vel(vrx_pos, vry_pos)
+        print(f"lin_vel : {v_target:.2f}, ang_vel : {w_target:.2f}")
+        rotation_speed_r, rotation_speed_l = self.motor.calc_motor_speed(v_target, w_target)
+        duty_r, duty_l = Motor.cal_duty_brushless(rotation_speed_r, rotation_speed_l)
+        print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
+        self.motor.run(duty_r, duty_l)
+        return
+    
+
+    # 追従操作
     def calculate_speed(self, x, y, max_vel=Control.max_linear_vel, max_angular_vel=Control.max_angular_vel):
         # x座標を0 ~ 1.2の範囲にクリッピング
         x = max(0, min(x, 1.2))
@@ -155,7 +170,7 @@ class TangController(Node):
             elif self.mode == "follow":
                 self.follow_control()
             else:
-                self.manual_control()
+                self.manual_control_with_pwm()
             rclpy.spin_once(self, timeout_sec=0.1)
 
 def main():

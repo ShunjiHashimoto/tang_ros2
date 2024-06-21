@@ -2,144 +2,78 @@
 # -*- coding: utf-8 -*-
 
 import time
+import math
 from datetime import datetime
-from gpiozero import Button, PhaseEnableMotor, LED, PWMLED
+from gpiozero import LED, PWMOutputDevice
 import sys
 import matplotlib.pyplot as plt
 from tang_control.config import Pin, PID, PWM, Fig, Control
 
 class Motor:
     def __init__(self):
-        self.prev_error = {'v' : 0, 'w' : 0}
-        self.error_sum = {'v' : 0, 'w' : 0}
-        self.prev_time = time.time()
-        self.prev_time_for_pwm = time.time()
-        self.start_time = datetime.now()
-        self.motor_r = PWMLED(Pin.pwm_r)
-        self.motor_l = PWMLED(Pin.pwm_l)
+        self.r_pwm = PWMOutputDevice(Pin.pwm_r, frequency = 500)
+        self.l_pwm = PWMOutputDevice(Pin.pwm_l, frequency = 500)
         self.r_FWD = LED(Pin.direction_r_FWD)
         self.r_REV = LED(Pin.direction_r_REV)
         self.l_FWD = LED(Pin.direction_l_FWD)
         self.l_REV = LED(Pin.direction_l_REV)
-        # プロット
-        self.fig = plt.figure()
-        self.ax1 = self.fig.add_subplot(1, 2, 1)
-        self.ax2 = self.fig.add_subplot(1, 2, 2)
     
-    def calculate_duty_cycle(self, duty):
-        # 1,000,000で100％
-        return int(((duty/100) * 1000000))
+    def calc_motor_speed(self, v_target, w_target):
+        vel_r = v_target + w_target * Control.tread_w/2
+        vel_l = v_target - w_target * Control.tread_w/2
+        rotation_speed_r = (vel_r/Control.wheel_r)*Control.gear_ratio*60/(2*math.pi)
+        rotation_speed_l = (vel_l/Control.wheel_r)*Control.gear_ratio*60/(2*math.pi)
+        return rotation_speed_r, rotation_speed_l
     
-    def calc_w(self, encoder_val, prev_encoder_val, dt):
-        delta_encoder_val = encoder_val - prev_encoder_val
-        return (delta_encoder_val*Control.radian_1encoder_r)/dt
-    
-    def pid_control(self, v_curr, w_curr, v_target, w_target, dt):
-        error_v  = v_target - v_curr
-        error_w  = w_target - w_curr
-        # if(error_v < 0): error_v = -error_v
-        pid_error_v = PID.Kp_v*error_v + PID.Ki_v*self.error_sum['v'] + PID.Kd_v*(error_v - self.prev_error['v'])/dt
-        pid_error_w = PID.Kp_w*error_w + PID.Ki_w*self.error_sum['w'] + PID.Kd_w*(error_w - self.prev_error['w'])/dt
-        # print(f"\033[91merror_v: {error_v:.3f}, 目標速度：{v_target}, 現在速度：{v_curr}, 計算後のerror_v: {pid_error_v:.3f}, error_sum_v: {self.error_sum['v']:.3f}, error_sum_w: {self.error_sum['w']:.3f}\033[0m")
-        self.error_sum['v'] += error_v
-        self.error_sum['w'] += error_w
-        self.prev_error['v'] = error_v
-        self.prev_error['w'] = error_w
-        if self.error_sum['v'] > PID.max_error_sum_v: self.error_sum['v'] = PID.max_error_sum_v
-        if abs(self.error_sum['w']) > PID.max_error_sum_w: 
-            if self.error_sum['w'] > 0: self.error_sum['w'] = PID.max_error_sum_w
-            if self.error_sum['w'] < 0: self.error_sum['w'] = -PID.max_error_sum_w
-        return pid_error_v, pid_error_w
-    
-    def calc_target_w_i(self, v_target, w_target, a_target, alpha_target, dt):
-        # 角速度計算
-        measured_w_r = self.calc_w(self.encoder_values['r'], self.prev_encoder_values['r'], dt)
-        measured_w_l = self.calc_w(self.encoder_values['l'], self.prev_encoder_values['l'], dt)
-        # 車体の速度、角速度計算
-        v_est = (measured_w_r*Control.wheel_r + measured_w_l*Control.wheel_r)/2
-        w_est = (measured_w_r*Control.wheel_r - measured_w_l*Control.wheel_r)/Control.tread_w
-        # エンコーダ値保存
-        self.prev_encoder_values['r'] = self.encoder_values['r']
-        self.prev_encoder_values['l'] = self.encoder_values['l']
-        # PID制御
-        pid_error_v, pid_error_w = self.pid_control(v_est, w_est, v_target, w_target,  dt)
-        # 各モータの角速度
-        w_r = (1/Control.wheel_r)*(v_est + pid_error_v) + (Control.tread_w/(2*Control.wheel_r)*(w_target + pid_error_w))
-        w_l = (1/Control.wheel_r)*(v_est + pid_error_v) - (Control.tread_w/(2*Control.wheel_r)*(w_target + pid_error_w))
-        # トルク計算
-        T_r = (Control.wheel_r/2)*Control.M*a_target + (Control.wheel_r/Control.tread_w)*Control.J*alpha_target
-        T_l = (Control.wheel_r/2)*Control.M*a_target - (Control.wheel_r/Control.tread_w)*Control.J*alpha_target
-        # 電流計算
-        i_r = T_r/Control.Kt_r
-        i_l = T_l/Control.Kt_l
-        # ログ
-        Fig.target_w_data.append(w_target)
-        Fig.target_vel_data.append(v_target)
-        Fig.vel_data.append(v_est)
-        Fig.w_data.append(w_est)
-        Fig.target_a_data.append(a_target)
-        return w_r, w_l, i_r, i_l
-    
-    def cal_duty(self, w_r, w_l, i_r, i_l):
-        e_r = Control.Ke_r*w_r + Control.R*i_r
-        e_l = Control.Ke_l*w_l + Control.R*i_l
-        duty_r = e_r/Control.input_v
-        duty_l = e_l/Control.input_v
+    def cal_duty_brushless(self, rotation_speed_r, rotation_speed_l):
+        # CuGo V3のギア比は1
+        # 4.5Vで4000[r/min], 0Vで0[r/min]
+        # x =4.5/4000
+        # y = 0.001125x（y  = V, x = rpm）
+        volt_r = 0.001125*rotation_speed_r
+        volt_l = 0.001125*rotation_speed_l
+        duty_r = volt_r/5.0
+        duty_l = volt_l/5.0
         return duty_r, duty_l
-    
-    def pwm_control_r(self, duty):
-        self.motor_r.forward(duty)
+        
+    def pwm_control_r_FWD(self, duty):
+        self.motor.r_FWD.on()
+        self.motor.r_REV.off()
+        self.motor.r_pwm.value = duty
+        return
+    def pwm_control_r_REV(self, duty):
+        self.motor.r_FWD.off()
+        self.motor.r_REV.on()
+        self.motor.r_pwm.value = duty
+        return
+    def pwm_control_l_FWD(self, duty):
+        self.motor.l_FWD.on()
+        self.motor.l_REV.off()
+        self.motor.l_pwm.value = duty
+        return
+    def pwm_control_l_REV(self, duty):
+        self.motor.l_FWD.on()
+        self.motor.l_REV.off()
+        self.motor.l_pwm.value = duty
         return
 
-    def pwm_control_l(self, duty):
-        self.motor_l.forward(duty)
+    def run(self, duty_r, duty_l):
+        if(abs(duty_r) > Control.max_duty or abs(duty_l > Control.max_duty)): 
+            print(f"over duty, r,l = {duty_r}, {duty_l}")
+            return
+        if duty_r > 0:
+            self.motor.pwm_control_r_FWD(duty_r)
+        else:
+            self.motor.pwm_control_r_REV(abs(duty_r))
+        if duty_l > 0:
+            self.motor.pwm_control_l_FWD(duty_l)
+        else:
+            self.motor.pwm_control_l_REV(abs(duty_l))
         return
-    
-    def motor_control(self, w_r, w_l, i_r, i_l):
-        # duty計算
-        duty_r, duty_l = self.cal_duty(w_r, w_l, i_r, i_l)
-        if duty_r<0: duty_r=0
-        if duty_l<0: duty_l=0
-        if duty_r > PWM.max_duty: duty_r = PWM.max_duty
-        if duty_l > PWM.max_duty: duty_l = PWM.max_duty
-        # PWM出力
-        self.pwm_control_r(duty_r)
-        self.pwm_control_l(duty_l)
-        return
-        
-    def run(self, v_target, w_target, a_target, alpha_target):
-        # 時間更新
-        current_time = time.time()
-        dt = current_time - self.prev_time
-        self.prev_time = time.time()
-        # ログ
-        elapsed_time = datetime.now() - self.start_time
-        elapsed_seconds = round(float(elapsed_time.total_seconds()), 4)
-        Fig.time_data.append(elapsed_seconds)
-        # モータの目標角速度と電流値を計算
-        w_r, w_l, i_r, i_l= self.calc_target_w_i(v_target, w_target, a_target, alpha_target, dt)
-        # 0.01秒周期でモータに指令を送る
-        if(current_time - dt > 0.01):
-            self.motor_control(w_r, w_l, i_r, i_l)
-        time.sleep(PID.dt)            
         
     def stop(self):
-        self.motor_r.stop()
-        self.motor_l.stop()
-        self.motor_l.close()
-        self.motor_r.close()
-        self.ax1.plot(Fig.time_data, Fig.vel_data, color="blue", label="vel_data")
-        self.ax1.plot(Fig.time_data, Fig.target_vel_data, color="green", label="target_vel")
-        self.ax1.plot(Fig.time_data, Fig.target_a_data, color="black", label="target_a")
-        self.ax2.plot(Fig.time_data, Fig.w_data, color="red", label="w_data")
-        self.ax2.plot(Fig.time_data, Fig.target_w_data, color="green", label="target_w")
-        self.ax1.legend(loc = 'upper right')
-        self.ax2.legend(loc = 'upper right')
-        self.ax1.grid(True)
-        self.ax2.grid(True)
-        self.fig.tight_layout()
-        now = datetime.now().replace(microsecond=0)
-        plt.savefig(f"/root/ros2_ws/src/tang_ros2/tang_control/tang_control/log/{now}_v={Control.v_target}_a={Control.a_target}_w={Control.w_target}_α={Control.alpha_target}.png")
+        self.motor.l_pwm.value = 0.0
+        self.motor.r_pwm.value = 0.0
 
 def main():
     # 目標速度
