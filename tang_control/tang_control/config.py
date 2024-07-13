@@ -3,28 +3,34 @@
 import math
 
 class Pin:
-    pwm_l            = 12 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
-    # direction_l_FWD  = 17 # DIG1（コネクタ番号①）, 0.0~5.0V
-    # direction_l_REV  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
-    direction_l_FWD  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
-    direction_l_REV  = 17 # DIG1（コネクタ番号①）, 0.0~5.0V
+    pwm_l            = 13 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
+    direction_l_FWD  = 18 # DIG1（コネクタ番号①）, 0.0~5.0V
+    direction_l_REV  = 20 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    direction_l      = 18
 
-    pwm_r            = 13 # AN2（コネクタ番号②）,0.0 ~ 0.9V
-    direction_r_FWD  = 18 # DIG2（コネクタ番号②）, 0.0~5.0V
-    direction_r_REV  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
+    pwm_r            = 12 # AN2（コネクタ番号②）,0.0 ~ 0.9V
+    direction_r_FWD  = 19 # DIG2（コネクタ番号②）, 0.0~5.0V
+    direction_r_REV  = 17 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
+    direction_r      = 17
     
+    encoder_r_A  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    encoder_r_B  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
     encoder_l_A  = 5
     encoder_l_B  = 6
+
     manual_mode  = 16
     follow_mode  = 21
+
     vrx_channel  = 0
     vry_channel  = 1
     swt_channel  = 2
+    adc_bat      = 3
+
     led_follow = 25
-    led = 26
+    green_led = 25
+    red_led = 26
+    buzzer = 2
     emergency_mode = 11
-    # encoder_r_A  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
-    # encoder_r_B  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
 
 class FOLLOWPID:
     p_gain = 2.307
