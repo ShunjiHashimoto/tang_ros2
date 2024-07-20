@@ -25,6 +25,7 @@ from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
 from tang_control.motor import Motor
 from gpiozero import Button, LED 
 import spidev
+import math
 
 try: 
     spi = spidev.SpiDev()
@@ -43,6 +44,8 @@ class TangController(Node):
         self.button_manual = Button(Pin.manual_mode)
         self.button_manual.when_pressed = self.switch_on_callback_manual
         self.motor = Motor()
+        self.led = LED(Pin.red_led)
+        self.buzzer = LED(Pin.buzzer)
         self.mode = "manual"
         self.follow_target_person = Person()
         
@@ -55,6 +58,7 @@ class TangController(Node):
        
     # モード切替 
     def switch_on_callback_follow(self):
+        self.buzzer.on()
         self.mode = "follow"
         self.logger.info("追従モード")
 
@@ -98,15 +102,28 @@ class TangController(Node):
         x = max(0, min(x, 1.2))
         # y座標を-1.2 ~ 1.2の範囲にクリッピング
         y = max(-1.2, min(y, 1.2))
-        # 前後方向の速度 (x 座標に基づく)
-        target_v = x / 1.2 * max_target_v
-        # 左右方向の速度 (y 座標に基づく)
-        target_w = y / 1.2 * max_target_w
+        # TODO: 角度が大きければ先にターンする
+        angle_radians = math.atan2(y, x)
+        angle_degrees = math.degrees(angle_radians)
+        print(f"Angle in degrees: {angle_degrees}")
+        if(abs(angle_degrees) > 60): 
+            target_v = 0.01
+            target_w = max_target_w + 2.0 if angle_degrees>0 else -max_target_w-2.0
+            print("max_angle")
+        else:
+            # 前後方向の速度 (x 座標に基づく)
+            target_v = x / 1.2 * max_target_v
+            # 左右方向の速度 (y 座標に基づく)
+            target_w = y / 1.2 * max_target_w
         return target_v, target_w
 
     def follow_control(self):
+        self.buzzer.off()
+        if(self.follow_target_person.pose.position.x < 0.3):
+            self.motor.pwm_control_stop()
         target_v, target_w = self.calc_vw_by_humanpos(self.follow_target_person.pose.position.x-0.15, self.follow_target_person.pose.position.y)
         print(f"target_v : {target_v:.2f}, target_w : {target_w:.2f}")
+
         if hasattr(self, 'follow_target_person') and self.follow_target_person is not None:
             duty_r, duty_l = self.motor.calc_duty_by_vw(target_v, target_w)
             print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
