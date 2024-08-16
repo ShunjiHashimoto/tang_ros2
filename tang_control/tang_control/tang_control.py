@@ -75,11 +75,15 @@ class TangController(Node):
     # pwmを使った手動操作
     def manual_pwm_control(self):
         # Read the joystick position data
-        vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
-        vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
-        print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
+        ## ブラシレスモータの設定
+        # vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
+        # vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
+        ## DCモータの設定
+        vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
+        vrx_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
+        # print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
         duty_r, duty_l = self.motor.calc_duty_by_joyinput(vrx_pos, vry_pos)
-        print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
+        # print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
         self.motor.run(duty_r, duty_l)
         return
     
