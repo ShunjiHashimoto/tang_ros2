@@ -37,31 +37,25 @@ class Motor:
         self.prev_normalized_value_x = x
         self.prev_normalized_value_y = y
         # その場旋回を実現するためのロジック
+        # yが前後方向、前進が＋
+        # xが左右方向、右が＋
         print(f"joystick: {joystick_x}, {joystick_y}")
-        if abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90:  # ジョイスティックが真横に倒されている場合
-            print(f"x: {x}")
-            if(x > 0):
-                duty_r = x
-                duty_l = 0
-            else:
-                duty_r = 0
-                duty_l = -x
-        else:
-            if(y > 0):
-                if(x > 0):
-                    duty_r = y 
-                    duty_l = ((PWM.max_duty - x)/PWM.max_duty)*y
-                if(x <= 0):
-                    duty_r = ((PWM.max_duty + x)/PWM.max_duty)*y
-                    duty_l = y
-                    print(f"duty_r: {duty_r}, duty_l: {duty_l}")
-            elif(y <= 0):
-                if(x > 0):
-                    duty_r = y 
-                    duty_l = -abs(((PWM.max_duty - x)/PWM.max_duty)*y)
-                if(x <= 0):
-                    duty_l =  y
-                    duty_r = -abs(((PWM.max_duty + x)/PWM.max_duty)*y)
+        if(y > 0): # 前進（y>0）
+            if(x > 0): # 右回転
+                duty_r = PWM.turn_const_duty if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90 and abs(y) < 0.1) else y
+                duty_l = ((PWM.max_duty - x)/PWM.max_duty)*y
+            if(x <= 0): # 左回転
+                duty_r = ((PWM.max_duty + x)/PWM.max_duty)*y
+                duty_l = PWM.turn_const_duty if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90 and abs(y) < 0.1) else y
+        elif(y <= 0): # 後退（y<0）
+            if(x > 0): # 右回転, ただし左車輪をより回し、右車輪はゆっくり回す
+                duty_r = -PWM.turn_const_duty if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90 and abs(y) < 0.1) else y
+                duty_l = -abs(((PWM.max_duty - x)/PWM.max_duty)*y)
+            if(x <= 0): # 左回転、ただし右車輪をより回し、左車輪はゆっくり回す
+                duty_l = -PWM.turn_const_duty if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90 and abs(y) < 0.1) else y
+                duty_r = -abs(((PWM.max_duty + x)/PWM.max_duty)*y)
+            
+        print(f"duty_r: {duty_r}, duty_l: {duty_l}")
         duty_l = max(min(duty_l, PWM.max_duty), -PWM.max_duty)
         duty_r = max(min(duty_r, PWM.max_duty), -PWM.max_duty)
         return duty_r, duty_l
@@ -124,7 +118,7 @@ class Motor:
             print(f"pwm control skipped, because over duty, r,l = {duty_r}, {duty_l}")
             return
         if abs(duty_r) < PWM.min_duty and abs(duty_l) < PWM.min_duty:
-            print(f"pwm control stop because low duty")
+            # print(f"pwm control stop because low duty")
             self.pwm_control_stop()
             return
         if duty_r > 0:

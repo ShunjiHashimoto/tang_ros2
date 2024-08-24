@@ -64,8 +64,9 @@ class PID:
 class PWM:
     # PWM周波数をHzで指定
     frequency = 1000 # [Hz]
-    max_duty = 0.3
+    max_duty = 0.5
     min_duty = 0.05
+    turn_const_duty = 0.1
 
 class Fig:
     time_data  = []
@@ -123,6 +124,7 @@ class Control:
     gear_ratio = 1.0
     # ブラシレスモータの電圧とモータ回転数[rpm]の関係, 4.5Vで4000[r/min]よりy = 4.5/4000x = 0.001125x
     volt_and_rpm_gain = 0.001125
+    # volt_and_rpm_gain = 0.01125 # DCモータ設定
     # デューティ比計算に用いる直流電圧
     src_volt = 5.0
     
