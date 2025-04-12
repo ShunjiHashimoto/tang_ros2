@@ -10,20 +10,20 @@ class Pin:
     # direction_l      = 18
 
     # pwm_r            = 12 # AN2（コネクタ番号②）,0.0 ~ 0.9V
-    # direction_r_FWD  = 19 # DIG2（コネクタ番号②）, 0.0~5.0V
-    # direction_r_REV  = 17 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
+    # direction_r_FWD  = 19 # DIG2（コネクタ番号②）, 0.0~5.0V , 前は17だった
+    # direction_r_REV  = 17 # encoderピンの青線, SWB(REV、モータが反対方向に回転), 前は19だった
     # direction_r      = 17
     
     ## DCモータの設定
-    pwm_l            = 13 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
-    direction_l_FWD  = 18 # DIG1（コネクタ番号①）, 0.0~5.0V
-    direction_l_REV  = 20 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
-    direction_l      = 18
+    pwm_r            = 13 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
+    direction_r_FWD  = 18 # DIG1（コネクタ番号①）, 0.0~5.0V
+    direction_r_REV  = 20 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    direction_r      = 18
 
-    pwm_r            = 12 # AN2（コネクタ番号②）,0.0 ~ 0.9V
-    direction_r_FWD  = 17 # DIG2（コネクタ番号②）, 0.0~5.0V
-    direction_r_REV  = 19 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
-    direction_r      = 17
+    pwm_l            = 12 # AN2（コネクタ番号②）,0.0 ~ 0.9V
+    direction_l_FWD  = 17 # DIG2（コネクタ番号②）, 0.0~5.0V
+    direction_l_REV  = 19 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
+    direction_l      = 17
 
     encoder_r_A  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
     encoder_r_B  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
