@@ -4,26 +4,26 @@ import math
 
 class Pin:
     ## ブラシレスモータの設定
-    # pwm_l            = 13 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
-    # direction_l_FWD  = 18 # DIG1（コネクタ番号①）, 0.0~5.0V
-    # direction_l_REV  = 20 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
-    # direction_l      = 18
-
-    # pwm_r            = 12 # AN2（コネクタ番号②）,0.0 ~ 0.9V
-    # direction_r_FWD  = 19 # DIG2（コネクタ番号②）, 0.0~5.0V
-    # direction_r_REV  = 17 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
-    # direction_r      = 17
-    
-    ## DCモータの設定
     pwm_l            = 13 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
-    direction_l_FWD  = 18 # DIG1（コネクタ番号①）, 0.0~5.0V
-    direction_l_REV  = 20 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    direction_l_FWD  = 20 # DIG1（コネクタ番号①）, 0.0~5.0V
+    direction_l_REV  = 18 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
     direction_l      = 18
 
     pwm_r            = 12 # AN2（コネクタ番号②）,0.0 ~ 0.9V
     direction_r_FWD  = 17 # DIG2（コネクタ番号②）, 0.0~5.0V
     direction_r_REV  = 19 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
     direction_r      = 17
+    
+    ## DCモータの設定
+    #pwm_l            = 13 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
+    #direction_l_FWD  = 18 # DIG1（コネクタ番号①）, 0.0~5.0V
+    #direction_l_REV  = 20 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    #direction_l      = 18
+
+    #pwm_r            = 12 # AN2（コネクタ番号②）,0.0 ~ 0.9V
+    #direction_r_FWD  = 17 # DIG2（コネクタ番号②）, 0.0~5.0V
+    #direction_r_REV  = 19 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
+    #direction_r      = 17
 
     encoder_r_A  = 22 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
     encoder_r_B  = 27 # encoderピンの青線, SWB(REV、モータが反対方向に回転)
@@ -63,10 +63,10 @@ class PID:
 
 class PWM:
     # PWM周波数をHzで指定
-    frequency = 1000 # [Hz]
-    max_duty = 0.5
+    frequency = 500 # [Hz]
+    max_duty = 0.15
     min_duty = 0.05
-    turn_const_duty = 0.1
+    turn_const_duty = 0.0
 
 class Fig:
     time_data  = []
@@ -123,8 +123,8 @@ class Control:
     # CuGoV3のギア比
     gear_ratio = 1.0
     # ブラシレスモータの電圧とモータ回転数[rpm]の関係, 4.5Vで4000[r/min]よりy = 4.5/4000x = 0.001125x
-    volt_and_rpm_gain = 0.001125
-    # volt_and_rpm_gain = 0.01125 # DCモータ設定
+    volt_and_rpm_gain = 0.01125
+    #volt_and_rpm_gain = 0.02125 # DCモータ設定
     # デューティ比計算に用いる直流電圧
     src_volt = 5.0
     
