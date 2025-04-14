@@ -4,7 +4,7 @@ import time
 import sys
 sys.path.append("..")
 from gpiozero import PWMOutputDevice, LED
-from config import Pin
+from tang_control.config import Pin
 
 direction1 = LED(Pin.direction_r_FWD) # FWD_r
 direction2 = LED(Pin.direction_r_REV) # REV_r
