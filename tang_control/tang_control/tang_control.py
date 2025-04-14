@@ -21,6 +21,7 @@ from rclpy.node import Node
 from rclpy.logging import get_logger
 
 from leg_tracker_ros2.msg import Person 
+from sensor_msgs.msg import LaserScan
 from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
 from tang_control.motor import Motor
 from gpiozero import Button, LED 
@@ -48,9 +49,16 @@ class TangController(Node):
         self.buzzer = LED(Pin.buzzer)
         self.mode = "manual"
         self.follow_target_person = Person()
-        
+        self.obstacle_near = False
+        # LiDARデータのサブスクライブ
+        self.lidar_subscription = self.create_subscription(LaserScan,'/scan',self.lidar_callback,10)
         self.subscription = self.create_subscription(Person, 'follow_target_person', self.follow_target_callback, 10)
+        self.threshold_distance = 0.3
         
+    def lidar_callback(self, msg):
+        # LiDARの点群データをチェック
+        self.obstacle_near = any(r < self.threshold_distance for r in msg.ranges)
+
     def follow_target_callback(self, msg):
         print(f"person x: {msg.pose.position.x}, y: {msg.pose.position.y}", flush=True)
         self.follow_target_person = msg
@@ -63,6 +71,7 @@ class TangController(Node):
         self.logger.info("追従モード")
 
     def switch_on_callback_manual(self):
+        self.buzzer.on()
         self.mode = "manual"
         self.logger.info("手動操作")
     
@@ -74,21 +83,27 @@ class TangController(Node):
     
     # pwmを使った手動操作
     def manual_pwm_control(self):
+        # xが前後方向、マイナスなら後ろ、プラスなら前
+        # yがプラスなら左モータ、マイナスなら右モータを回す
+        self.buzzer.off()
         # Read the joystick position data
         ## ブラシレスモータの設定
-        # vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
-        # vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
+        # 前後方向
+        vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
+        # 左右方向
+        vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
         ## DCモータの設定
-        vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
-        vrx_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
-        # print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
+        #vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
+        #vrx_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
+        print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
         duty_r, duty_l = self.motor.calc_duty_by_joyinput(vrx_pos, vry_pos)
-        # print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
+        #print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
         self.motor.run(duty_r, duty_l)
         return
     
     # 速度制御を使った手動操作
     def manual_vel_control(self):
+        self.buzzer.off()
         center =  Control.max_joystick_val/2
         vrx_pos = (self.read_analog_pin(Pin.vrx_channel) - center) / (Control.max_joystick_val - center)  # normalize to [-1, 1]
         vry_pos = (self.read_analog_pin(Pin.vry_channel) - center) / (Control.max_joystick_val - center)  
@@ -112,7 +127,7 @@ class TangController(Node):
         print(f"Angle in degrees: {angle_degrees}")
         if(abs(angle_degrees) > 60): 
             target_v = 0.01
-            target_w = max_target_w + 2.0 if angle_degrees>0 else -max_target_w-2.0
+            target_w = max_target_w + 1.0 if angle_degrees>0 else -max_target_w-1.0
             print("max_angle")
         else:
             # 前後方向の速度 (x 座標に基づく)
@@ -132,14 +147,18 @@ class TangController(Node):
             duty_r, duty_l = self.motor.calc_duty_by_vw(target_v, target_w)
             print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
             self.motor.run(duty_r, duty_l)
+            # DCモータの設定
+            #self.motor.run(duty_l, duty_r)
         else:
             self.logger.warning('No follow target person data available.')
         return
 
     def start(self):
         while(rclpy.ok()):
-            if self.mode == "emergency": 
+            if self.mode == "emergency" or self.obstacle_near: 
+                self.motor.stop()
                 self.logger.info("緊急停止")
+                self.mode = "manual"
             elif self.mode == "follow":
                 self.follow_control()
             elif self.mode == "manual":
