@@ -1,7 +1,8 @@
 import sys
 sys.path.append("..")
-from tang_control.tang_control.config import Pin, Control 
+from tang_control.config import Pin, Control 
 from gpiozero import LED
+import time
 
 buzzer = LED(Pin.buzzer)
 try:
