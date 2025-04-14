@@ -30,6 +30,7 @@ class Motor:
         smoothed_value = self.alpha * normalized_value + (1 - self.alpha) * prev_value
         return smoothed_value
     
+    # xが前後、yが左右、左が＋
     def calc_duty_by_joyinput(self, joystick_x, joystick_y):
         x = self.normalize_joystick_input(joystick_x, prev_value=self.prev_normalized_value_x)
         y = self.normalize_joystick_input(joystick_y, prev_value=self.prev_normalized_value_y)
@@ -39,23 +40,23 @@ class Motor:
         # その場旋回を実現するためのロジック
         # yが前後方向、前進が＋
         # xが左右方向、右が＋
-        print(f"joystick: {joystick_x}, {joystick_y}")
-        if(y > 0): # 前進（y>0）
-            if(x > 0): # 右回転
-                duty_r = PWM.turn_const_duty if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90 and abs(y) < 0.1) else y
-                duty_l = ((PWM.max_duty - x)/PWM.max_duty)*y
-            if(x <= 0): # 左回転
-                duty_r = ((PWM.max_duty + x)/PWM.max_duty)*y
-                duty_l = PWM.turn_const_duty if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90 and abs(y) < 0.1) else y
-        elif(y <= 0): # 後退（y<0）
-            if(x > 0): # 右回転, ただし左車輪をより回し、右車輪はゆっくり回す
-                duty_r = -PWM.turn_const_duty if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90 and abs(y) < 0.1) else y
-                duty_l = -abs(((PWM.max_duty - x)/PWM.max_duty)*y)
-            if(x <= 0): # 左回転、ただし右車輪をより回し、左車輪はゆっくり回す
-                duty_l = -PWM.turn_const_duty if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.90 and abs(y) < 0.1) else y
-                duty_r = -abs(((PWM.max_duty + x)/PWM.max_duty)*y)
+        #print(f"joystick: {joystick_x}, {joystick_y}")
+        if(x > 0): # 前進（x>0）
+            if(y <= 0): # 右回転
+                duty_l = PWM.turn_const_duty if (abs(joystick_x) < 0.05 and abs(joystick_y) > 0.90 and abs(x) < 0.1) else x
+                duty_r = ((PWM.max_duty - y)/PWM.max_duty)*x
+            if(y > 0): # 左回転
+                duty_l = ((PWM.max_duty + y)/PWM.max_duty)*x
+                duty_r = PWM.turn_const_duty if (abs(joystick_x) < 0.05 and abs(joystick_y) > 0.90 and abs(x) < 0.1) else x
+        elif(x <= 0): # 後退（y<0）
+            if(y <= 0): # 右回転, ただし左車輪をより回し、右車輪はゆっくり回す
+                duty_l = -PWM.turn_const_duty if (abs(joystick_x) < 0.05 and abs(joystick_y) > 0.90 and abs(x) < 0.1) else x 
+                duty_r = -abs(((PWM.max_duty - y)/PWM.max_duty)*x)
+            if(y > 0): # 左回転、ただし右車輪をより回し、左車輪はゆっくり回す
+                duty_r = -PWM.turn_const_duty if (abs(joystick_x) < 0.05 and abs(joystick_y) > 0.90 and abs(x) < 0.1) else x 
+                duty_l = -abs(((PWM.max_duty + y)/PWM.max_duty)*x)
             
-        print(f"duty_r: {duty_r}, duty_l: {duty_l}")
+        #print(f"duty_r: {duty_r}, duty_l: {duty_l}")
         duty_l = max(min(duty_l, PWM.max_duty), -PWM.max_duty)
         duty_r = max(min(duty_r, PWM.max_duty), -PWM.max_duty)
         return duty_r, duty_l
@@ -81,26 +82,26 @@ class Motor:
         return duty_r, duty_l
         
     def pwm_control_r_FWD(self, duty):
-        # self.r_FWD.on()
-        self.r_FWD.off()
+        self.r_FWD.on()
+        #self.r_FWD.off()
         self.r_REV.off()
         self.r_pwm.value = duty
         return
     def pwm_control_r_REV(self, duty):
-        self.r_FWD.on()
-        # self.r_FWD.off()
+        #self.r_FWD.on()
+        self.r_FWD.off()
         self.r_REV.on()
         self.r_pwm.value = duty
         return
     def pwm_control_l_FWD(self, duty):
-        # self.l_FWD.on()
-        self.l_FWD.off()
+        #self.l_FWD.on()
+        self.l_FWD.on()
         self.l_REV.off()
         self.l_pwm.value = duty
         return
     def pwm_control_l_REV(self, duty):
-        self.l_FWD.on()
-        # self.l_FWD.off()
+        #self.l_FWD.on()
+        self.l_FWD.off()
         self.l_REV.on()
         self.l_pwm.value = duty
         return
@@ -114,7 +115,7 @@ class Motor:
         return
 
     def run(self, duty_r, duty_l):
-        if(abs(duty_r) > PWM.max_duty or abs(duty_l > PWM.max_duty)): 
+        if(abs(duty_r) > 0.2 or abs(duty_l) > 0.2): 
             print(f"pwm control skipped, because over duty, r,l = {duty_r}, {duty_l}")
             return
         if abs(duty_r) < PWM.min_duty and abs(duty_l) < PWM.min_duty:
@@ -126,9 +127,9 @@ class Motor:
         else:
             self.pwm_control_r_REV(abs(duty_r))
         if duty_l > 0:
-            self.pwm_control_l_FWD(duty_l)
+            self.pwm_control_l_REV(duty_l)
         else:
-            self.pwm_control_l_REV(abs(duty_l))
+            self.pwm_control_l_FWD(abs(duty_l))
         return
         
     def stop(self):
