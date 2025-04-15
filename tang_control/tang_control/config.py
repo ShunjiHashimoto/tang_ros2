@@ -80,6 +80,7 @@ class Control:
     # 最大速度
     max_target_v = 0.3
     max_target_w = 1.0
+    max_target_w_offset = 2.0 # bldcの場合1.0
     # joystickの最大値
     max_joystick_val = 1064.0
     velocity_thresh = 1e-2

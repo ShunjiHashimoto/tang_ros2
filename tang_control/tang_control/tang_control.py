@@ -82,22 +82,19 @@ class TangController(Node):
         return data
     
     # pwmを使った手動操作
+    # xが前後方向、マイナスなら後ろ、プラスなら前
+    # yがプラスなら左モータ、マイナスなら右モータを回す
     def manual_pwm_control(self):
-        # xが前後方向、マイナスなら後ろ、プラスなら前
-        # yがプラスなら左モータ、マイナスなら右モータを回す
         self.buzzer.off()
-        # Read the joystick position data
-        ## ブラシレスモータの設定
-        # 前後方向
-        vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
-        # 左右方向
-        vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
+        # ブラシレスモータの設定
+        # vrx_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # 前後方向
+        # vry_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1  # 左右方向
         ## DCモータの設定
-        #vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
-        #vrx_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
+        vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1   # 前後方向
+        vrx_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   # 左右方向 
         print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
         duty_r, duty_l = self.motor.calc_duty_by_joyinput(vrx_pos, vry_pos)
-        #print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
+        # print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
         self.motor.run(duty_r, duty_l)
         return
     
@@ -126,8 +123,9 @@ class TangController(Node):
         angle_degrees = math.degrees(angle_radians)
         print(f"Angle in degrees: {angle_degrees}")
         if(abs(angle_degrees) > 60): 
-            target_v = 0.01
-            target_w = max_target_w + 1.0 if angle_degrees>0 else -max_target_w-1.0
+            target_v = 0.0
+            # DCモータの設定
+            target_w = max_target_w + Control.max_target_w_offset if angle_degrees > 0 else -max_target_w -Control.max_target_w_offset
             print("max_angle")
         else:
             # 前後方向の速度 (x 座標に基づく)
@@ -146,9 +144,10 @@ class TangController(Node):
         if hasattr(self, 'follow_target_person') and self.follow_target_person is not None:
             duty_r, duty_l = self.motor.calc_duty_by_vw(target_v, target_w)
             print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
-            self.motor.run(duty_r, duty_l)
+            # BLDCモータの設定
+            # self.motor.run(duty_r, duty_l)
             # DCモータの設定
-            #self.motor.run(duty_l, duty_r)
+            self.motor.run(duty_l, duty_r)
         else:
             self.logger.warning('No follow target person data available.')
         return
