@@ -92,7 +92,7 @@ class TangController(Node):
         ## DCモータの設定
         vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1   # 前後方向
         vrx_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   # 左右方向 
-        print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
+        # print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
         duty_r, duty_l = self.motor.calc_duty_by_joyinput(vrx_pos, vry_pos)
         # print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
         self.motor.run(duty_r, duty_l)

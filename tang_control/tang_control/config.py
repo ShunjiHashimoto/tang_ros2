@@ -66,7 +66,8 @@ class PWM:
     frequency = 1000 # [Hz]
     max_duty = 0.5
     min_duty = 0.05
-    turn_const_duty = 0.1
+    turn_const_duty_r = 0.1 # 右車輪の定数デューティ比, 超信地旋回時
+    turn_const_duty_l = 0.2 # 左車輪の定数デューティ比
 
 class Fig:
     time_data  = []
