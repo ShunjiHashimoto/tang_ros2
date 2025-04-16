@@ -32,29 +32,30 @@ class Motor:
     
     # xが前後、yが左右、左が＋
     def calc_duty_by_joyinput(self, joystick_x, joystick_y):
-        x = self.normalize_joystick_input(joystick_x, prev_value=self.prev_normalized_value_x)
-        y = self.normalize_joystick_input(joystick_y, prev_value=self.prev_normalized_value_y)
+        normarized_x = self.normalize_joystick_input(joystick_x, prev_value=self.prev_normalized_value_x)
+        normarized_y = self.normalize_joystick_input(joystick_y, prev_value=self.prev_normalized_value_y)
         # 現在の値を保存しておく
-        self.prev_normalized_value_x = x
-        self.prev_normalized_value_y = y
+        self.prev_normalized_value_x = normarized_x
+        self.prev_normalized_value_y = normarized_y
         # その場旋回を実現するためのロジック
         # yが前後方向、前進が＋
         # xが左右方向、右が＋
-        #print(f"joystick: {joystick_x}, {joystick_y}")
-        if(x > 0): # 前進（x>0）
-            if(y <= 0): # 右回転
-                duty_l = PWM.turn_const_duty if (abs(joystick_x) < 0.05 and abs(joystick_y) > 0.90 and abs(x) < 0.1) else x
-                duty_r = ((PWM.max_duty - y)/PWM.max_duty)*x
-            if(y > 0): # 左回転
-                duty_l = ((PWM.max_duty + y)/PWM.max_duty)*x
-                duty_r = PWM.turn_const_duty if (abs(joystick_x) < 0.05 and abs(joystick_y) > 0.90 and abs(x) < 0.1) else x
-        elif(x <= 0): # 後退（y<0）
-            if(y <= 0): # 右回転, ただし左車輪をより回し、右車輪はゆっくり回す
-                duty_l = -PWM.turn_const_duty if (abs(joystick_x) < 0.05 and abs(joystick_y) > 0.90 and abs(x) < 0.1) else x 
-                duty_r = -abs(((PWM.max_duty - y)/PWM.max_duty)*x)
-            if(y > 0): # 左回転、ただし右車輪をより回し、左車輪はゆっくり回す
-                duty_r = -PWM.turn_const_duty if (abs(joystick_x) < 0.05 and abs(joystick_y) > 0.90 and abs(x) < 0.1) else x 
-                duty_l = -abs(((PWM.max_duty + y)/PWM.max_duty)*x)
+        # 論理はjoystickのx,yの値をそのまま使い、制御にはnormarized_x,yを使う
+        print(f"joystick: x={joystick_x}, y={joystick_y}, normarized_x={normarized_x}, normalized_y={normarized_y}")
+        if(joystick_y >= -0.15): # 前進（y>0）
+            if(joystick_x > 0): # 右回転
+                duty_r = PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
+                duty_l = ((PWM.max_duty - normarized_x)/PWM.max_duty)*normarized_y
+            if(joystick_x <= 0): # 左回転
+                duty_r = ((PWM.max_duty + normarized_x)/PWM.max_duty)*normarized_y
+                duty_l = PWM.turn_const_duty_l if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
+        elif(joystick_y < -0.15): # 後退（y<0）
+            if(joystick_x > 0): # 右回転, ただし左車輪をより回し、右車輪はゆっくり回す
+                duty_r = -PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
+                duty_l = -abs(((PWM.max_duty - normarized_x)/PWM.max_duty)*normarized_y)
+            if(joystick_y <= 0): # 左回転、ただし右車輪をより回し、左車輪はゆっくり回す
+                duty_l = -PWM.turn_const_duty_l if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
+                duty_r = -abs(((PWM.max_duty + normarized_x)/PWM.max_duty)*normarized_y)
             
         #print(f"duty_r: {duty_r}, duty_l: {duty_l}")
         duty_l = max(min(duty_l, PWM.max_duty), -PWM.max_duty)
