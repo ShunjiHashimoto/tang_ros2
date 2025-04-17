@@ -43,6 +43,12 @@ class Pin:
     red_led = 26
     buzzer = 2
     emergency_mode = 11
+    
+    # Joystickノードで使用するボタン
+    emergency_button = 5
+    unlock_emergency_button = 4
+    followme_start_button = 7
+    followme_stop_button = 8
 
 class FOLLOWPID:
     p_gain = 2.307

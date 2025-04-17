@@ -21,7 +21,7 @@ from rclpy.node import Node
 from rclpy.logging import get_logger
 
 from leg_tracker_ros2.msg import Person 
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, Joy
 from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
 from tang_control.motor import Motor
 from gpiozero import Button, LED 
@@ -54,6 +54,8 @@ class TangController(Node):
         self.lidar_subscription = self.create_subscription(LaserScan,'/scan',self.lidar_callback,10)
         self.subscription = self.create_subscription(Person, 'follow_target_person', self.follow_target_callback, 10)
         self.threshold_distance = 0.3
+        # joyトピック 
+        self.joy_pub = self.create_publisher(Joy, 'joy', 10)
         
     def lidar_callback(self, msg):
         # LiDARの点群データをチェック
@@ -63,17 +65,29 @@ class TangController(Node):
         print(f"person x: {msg.pose.position.x}, y: {msg.pose.position.y}", flush=True)
         self.follow_target_person = msg
         # -1.2 ~ 1.2 でyは変わる、またxも0 ~ 1.2で変わる
+    
+    # joystickのボタンを押したときのコールバック関数
+    def publish_joy(self, button_index):
+        msg = Joy()
+        msg.axes = [0.0] * 8 
+        msg.buttons = [0] * 12
+        msg.buttons[button_index] = 1
+        self.joy_pub.publish(msg)
        
     # モード切替 
     def switch_on_callback_follow(self):
+        self.logger.info("追従モード")
         self.buzzer.on()
         self.mode = "follow"
-        self.logger.info("追従モード")
+        self.publish_joy(Pin.unlock_emergency_button) 
+        self.publish_joy(Pin.followme_start_button) 
 
     def switch_on_callback_manual(self):
+        self.logger.info("手動操作")
         self.buzzer.on()
         self.mode = "manual"
-        self.logger.info("手動操作")
+        self.publish_joy(Pin.emergency_button) 
+        self.publish_joy(Pin.followme_stop_button) 
     
     # joystick信号の取得
     def read_analog_pin(self, channel):
@@ -162,7 +176,6 @@ class TangController(Node):
                 self.follow_control()
             elif self.mode == "manual":
                 self.manual_pwm_control()
-                # self.manual_vel_control()
             else:
                 print("Something wrong, Please check curretn mode")
             rclpy.spin_once(self, timeout_sec=0.1)
