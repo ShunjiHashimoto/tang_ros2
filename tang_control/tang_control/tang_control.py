@@ -112,20 +112,6 @@ class TangController(Node):
         self.motor.run(duty_r, duty_l)
         return
     
-    # 速度制御を使った手動操作
-    def manual_vel_control(self):
-        self.buzzer.off()
-        center =  Control.max_joystick_val/2
-        vrx_pos = (self.read_analog_pin(Pin.vrx_channel) - center) / (Control.max_joystick_val - center)  # normalize to [-1, 1]
-        vry_pos = (self.read_analog_pin(Pin.vry_channel) - center) / (Control.max_joystick_val - center)  
-        print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
-        target_v, target_w = self.motor.calc_robot_vel_command(vrx_pos, vry_pos)
-        print(f"target_v : {target_v:.2f}, target_w : {target_w:.2f}")
-        duty_r, duty_l = self.motor.calc_duty_by_vw(target_v, target_w)
-        print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
-        self.motor.run(duty_r, duty_l)
-        return
-    
     # 追従操作
     def calc_vw_by_humanpos(self, x, y, max_target_v=Control.max_target_v, max_target_w=Control.max_target_w):
         # x座標を0 ~ 1.2の範囲にクリッピング
