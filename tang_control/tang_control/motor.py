@@ -40,7 +40,7 @@ class Motor:
         # yが前後方向、前進が＋
         # xが左右方向、右が＋
         # 論理はjoystickのx,yの値をそのまま使い、制御にはnormarized_x,yを使う
-        print(f"joystick: x={joystick_x}, y={joystick_y}, normarized_x={normarized_x}, normalized_y={normarized_y}")
+        print(f"joystick: x={joystick_x:.2f}, y={joystick_y:.2f}, normarized_x={normarized_x:.2f}, normalized_y={normarized_y:.2f}", flush=True)
         if(joystick_y >= -0.15): # 前進（y>0）
             if(joystick_x > 0): # 右回転
                 duty_r = PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
@@ -56,7 +56,7 @@ class Motor:
                 duty_l = -PWM.turn_const_duty_l if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
                 duty_r = -abs(((PWM.max_duty + normarized_x)/PWM.max_duty)*normarized_y)
             
-        print(f"duty_r: {duty_r}, duty_l: {duty_l}")
+        print(f"duty_r: {duty_r:.2f}, duty_l: {duty_l:.2f}", flush=True)
         duty_l = max(min(duty_l, PWM.max_duty), -PWM.max_duty)
         duty_r = max(min(duty_r, PWM.max_duty), -PWM.max_duty)
         return duty_r, duty_l
