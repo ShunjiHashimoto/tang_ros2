@@ -5,8 +5,8 @@ import math
 class Pin:
     ## ブラシレスモータの設定
     pwm_l            = 13 # AN1（コネクタ番号①）, 0.0 ~ 0.9V
-    direction_l_FWD  = 20 # DIG1（コネクタ番号①）, 0.0~5.0V
-    direction_l_REV  = 18 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
+    direction_l_FWD  = 18 # DIG1（コネクタ番号①）, 0.0~5.0V
+    direction_l_REV  = 20 # encoderピンの黄線, SWB(REV、モータが反対方向に回転)
     direction_l      = 18
 
     pwm_r            = 12 # AN2（コネクタ番号②）,0.0 ~ 0.9V
