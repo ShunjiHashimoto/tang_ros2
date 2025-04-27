@@ -49,6 +49,7 @@ class Pin:
     unlock_emergency_button = 4
     followme_start_button = 7
     followme_stop_button = 8
+    teleop_start_button = [0, 1, 2, 3]
 
 class FOLLOWPID:
     p_gain = 2.307

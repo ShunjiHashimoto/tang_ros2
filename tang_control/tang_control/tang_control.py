@@ -54,11 +54,16 @@ class TangController(Node):
         self.cmd_vel_subscription = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
         self.threshold_distance = 0.3
         # joyトピック 
-        self.joy_pub = self.create_publisher(Joy, 'joy', 10)
+        self.joy_pub = self.create_publisher(Joy, '/joy', 10)
+        self.joy_subscriber = self.create_subscription(Joy,'/joy', self.joy_callback, 10)
         
     def lidar_callback(self, msg):
         # LiDARの点群データをチェック
         self.obstacle_near = any(r < self.threshold_distance for r in msg.ranges)
+    
+    def joy_callback(self, msg):
+        if any(msg.buttons[i] == 1 for i in Pin.teleop_start_button):
+            self.mode = "teleop"
 
     def cmd_vel_callback(self, cmd_vel):
         duty_l, duty_r = self.convert_cmdvel_to_duty(cmd_vel)
@@ -76,15 +81,16 @@ class TangController(Node):
 
     def convert_cmdvel_to_duty(self, cmd_vel):
         # cmd_velからモータのデューティ比を計算する
-        v_l = cmd_vel.linear.x - (LiDARParam.inverted * cmd_vel.angular.z) * (Control.tread_width/2) 
-        v_r = cmd_vel.linear.x + (LiDARParam.inverted * cmd_vel.angular.z)  * (Control.tread_width/2)
+        corrected_angular_z = cmd_vel.angular.z * LiDARParam.inverted if self.mode == "follow" else cmd_vel.angular.z
+        v_l = cmd_vel.linear.x - corrected_angular_z * (Control.tread_width/2) 
+        v_r = cmd_vel.linear.x + corrected_angular_z  * (Control.tread_width/2)
         # 車輪の回転数に変換
         wheel_rpm_l = v_l / (2 * math.pi * Control.wheel_radius) * 60
         wheel_rpm_r = v_r / (2 * math.pi * Control.wheel_radius) * 60
         # モータの回転数に変換
         motor_rpm_l = wheel_rpm_l * Control.gear_ratio
         motor_rpm_r = wheel_rpm_r * Control.gear_ratio
-        print(f"motor_rpm_l : {motor_rpm_l:.2f}, motor_rpm_r : {motor_rpm_r:.2f}", flush=True)
+        # print(f"motor_rpm_l : {motor_rpm_l:.2f}, motor_rpm_r : {motor_rpm_r:.2f}", flush=True)
         # デューティ比に変換
         duty_l = (motor_rpm_l / Control.max_motor_rpm) * PWM.max_duty_follow
         duty_r = (motor_rpm_r / Control.max_motor_rpm) * PWM.max_duty_follow
@@ -121,7 +127,7 @@ class TangController(Node):
         vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
         # 左右方向
         vrx_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
-        print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
+        # print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
         duty_r, duty_l = self.motor.calc_duty_by_joyinput(vrx_pos, vry_pos)
         # print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
         self.motor.run(duty_r, duty_l)
@@ -162,6 +168,8 @@ class TangController(Node):
                 self.follow_control()
             elif self.mode == "manual":
                 self.manual_pwm_control()
+            elif self.mode == "teleop":
+                print(f"mode: {self.mode}")
             else:
                 print("Something wrong, Please check curretn mode")
             rclpy.spin_once(self, timeout_sec=0.1)
