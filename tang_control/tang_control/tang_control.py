@@ -22,7 +22,7 @@ from rclpy.logging import get_logger
 
 from sensor_msgs.msg import LaserScan, Joy
 from geometry_msgs.msg import Twist
-from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
+from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control, LiDARParam
 from tang_control.motor import Motor
 from gpiozero import Button, LED 
 import spidev

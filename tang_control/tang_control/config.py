@@ -140,6 +140,8 @@ class Control:
     # デューティ比計算に用いる直流電圧
     src_volt = 5.0
     
-
 class HumanFollowParam:
     depth_min_thresh = 0.5
+
+class LiDARParam:
+    inverted = -1
