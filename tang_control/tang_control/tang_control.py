@@ -137,27 +137,6 @@ class TangController(Node):
         self.motor.run(duty_r, duty_l)
         return
     
-    # 追従操作
-    def calc_vw_by_humanpos(self, x, y, max_target_v=Control.max_target_v, max_target_w=Control.max_target_w):
-        # x座標を0 ~ 1.2の範囲にクリッピング
-        x = max(0, min(x, 1.2))
-        # y座標を-1.2 ~ 1.2の範囲にクリッピング
-        y = max(-1.2, min(y, 1.2))
-        # TODO: 角度が大きければ先にターンする
-        angle_radians = math.atan2(y, x)
-        angle_degrees = math.degrees(angle_radians)
-        print(f"Angle in degrees: {angle_degrees}")
-        if(abs(angle_degrees) > 60): 
-            target_v = 0.01
-            target_w = max_target_w + 1.0 if angle_degrees>0 else -max_target_w-1.0
-            print("max_angle")
-        else:
-            # 前後方向の速度 (x 座標に基づく)
-            target_v = x / 1.2 * max_target_v
-            # 左右方向の速度 (y 座標に基づく)
-            target_w = y / 1.2 * max_target_w
-        return target_v, target_w
-
     def follow_control(self):
         self.buzzer.off()
         return
