@@ -21,9 +21,6 @@ class Motor:
         self.alpha = 0.1  # EMAの平滑化係数。0に近いほど変化が緩やか
     
     def normalize_joystick_input(self, value, max_value=PWM.max_duty, prev_value=0):
-        # ジョイスティック入力がゼロなら、ゼロを返す
-        # if abs(value) <= 0.0000001:
-        #     return 0
         # ジョイスティック入力を正規化
         normalized_value = value * max_value
         # 平滑化された値を計算
@@ -31,9 +28,9 @@ class Motor:
         return smoothed_value
     
     # xが前後、yが左右、左が＋
-    def calc_duty_by_joyinput(self, joystick_x, joystick_y):
-        normarized_x = self.normalize_joystick_input(joystick_x, prev_value=self.prev_normalized_value_x)
-        normarized_y = self.normalize_joystick_input(joystick_y, prev_value=self.prev_normalized_value_y)
+    def calc_duty_by_joyinput(self, joystick_x, joystick_y, max_duty):
+        normarized_x = self.normalize_joystick_input(joystick_x, max_value=max_duty, prev_value=self.prev_normalized_value_x)
+        normarized_y = self.normalize_joystick_input(joystick_y, max_value=max_duty, prev_value=self.prev_normalized_value_y)
         # 現在の値を保存しておく
         self.prev_normalized_value_x = normarized_x
         self.prev_normalized_value_y = normarized_y
@@ -45,21 +42,21 @@ class Motor:
         if(joystick_y >= -0.15): # 前進（y>0）
             if(joystick_x > 0): # 右回転
                 duty_l = PWM.turn_const_duty_l if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
-                duty_r = ((PWM.max_duty - normarized_x)/PWM.max_duty)*normarized_y
+                duty_r = ((max_duty - normarized_x)/max_duty)*normarized_y
             if(joystick_x <= 0): # 左回転
-                duty_l = ((PWM.max_duty + normarized_x)/PWM.max_duty)*normarized_y
+                duty_l = ((max_duty + normarized_x)/max_duty)*normarized_y
                 duty_r = PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
         elif(joystick_y < -0.15): # 後退（y<0）
             if(joystick_x > 0): # 右回転, ただし左車輪をより回し、右車輪はゆっくり回す
                 duty_l = -PWM.turn_const_duty_l if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
-                duty_r = -abs(((PWM.max_duty - normarized_x)/PWM.max_duty)*normarized_y)
+                duty_r = -abs(((max_duty - normarized_x)/max_duty)*normarized_y)
             if(joystick_y <= 0): # 左回転、ただし右車輪をより回し、左車輪はゆっくり回す
                 duty_r = -PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
-                duty_l = -abs(((PWM.max_duty + normarized_x)/PWM.max_duty)*normarized_y)
+                duty_l = -abs(((max_duty + normarized_x)/max_duty)*normarized_y)
             
         print(f"duty_r: {duty_r:.2f}, duty_l: {duty_l:.2f}", flush=True)
-        duty_l = max(min(duty_l, PWM.max_duty), -PWM.max_duty)
-        duty_r = max(min(duty_r, PWM.max_duty), -PWM.max_duty)
+        duty_l = max(min(duty_l, max_duty), -max_duty)
+        duty_r = max(min(duty_r, max_duty), -max_duty)
         return duty_r, duty_l
 
     def calc_robot_vel_command(self, joystick_x, joystick_y):
