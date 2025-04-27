@@ -45,7 +45,22 @@ class TangController(Node):
         self.button_manual = Button(Pin.manual_mode)
         self.button_manual.when_pressed = self.switch_on_callback_manual
         self.motor = Motor()
-        self.led = LED(Pin.red_led)
+        self.red_led = LED(Pin.red_led) 
+        self.green_led = LED(Pin.green_led)
+        self.green_led.on()
+        self.mode = "manual"
+        self.speed_mode = "low"
+        self.obstacle_near = False
+        self.press_start_time = None  # 押し込み開始時刻
+        self.button_pressed_last = False  # 前回の押し状態
+        self.flag_teleop_speed_mode = False
+
+        # LiDARデータのサブスクライブ
+        self.lidar_subscription = self.create_subscription(LaserScan,'/scan',self.lidar_callback,10)
+        self.cmd_vel_subscription = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
+        self.threshold_distance = 0.3
+        # joyトピック 
+        self.joy_pub = self.create_publisher(Joy, '/joy', 10)
         self.buzzer = LED(Pin.buzzer)
         self.mode = "manual"
         self.obstacle_near = False
@@ -57,6 +72,7 @@ class TangController(Node):
         self.joy_pub = self.create_publisher(Joy, '/joy', 10)
         self.joy_subscriber = self.create_subscription(Joy,'/joy', self.joy_callback, 10)
         
+    # Publish and Subscribe 
     def lidar_callback(self, msg):
         # LiDARの点群データをチェック
         self.obstacle_near = any(r < self.threshold_distance for r in msg.ranges)
@@ -67,22 +83,66 @@ class TangController(Node):
 
     def cmd_vel_callback(self, cmd_vel):
         duty_l, duty_r = self.convert_cmdvel_to_duty(cmd_vel)
-        print(f"Received cmd_vel: linear.x={cmd_vel.linear.x}, angular.z={cmd_vel.angular.z}", flush=True)
-        print(f"duty_l : {duty_l:.2f}, duty_r : {duty_r:.2f}", flush=True)
+        # print(f"Received cmd_vel: linear.x={cmd_vel.linear.x}, angular.z={cmd_vel.angular.z}", flush=True)
+        # print(f"duty_l : {duty_l:.2f}, duty_r : {duty_r:.2f}", flush=True)
         self.motor.run(duty_r, duty_l)
     
-    # joystickのボタンを押したときのコールバック関数
-    def publish_joy(self, button_index):
+    def publish_fake_joy_button_press(self, button_index):
         msg = Joy()
         msg.axes = [0.0] * 8 
         msg.buttons = [0] * 12
         msg.buttons[button_index] = 1
         self.joy_pub.publish(msg)
+    
+    # 走行モード切替 
+    def switch_on_callback_follow(self):
+        self.logger.info("追従モード")
+        self.buzzer.on()
+        self.mode = "follow"
+        self.publish_fake_joy_button_press(Pin.unlock_emergency_button) 
+        self.publish_fake_joy_button_press(Pin.followme_start_button) 
+
+    def switch_on_callback_manual(self):
+        self.logger.info("手動操作")
+        self.buzzer.on()
+        self.mode = "manual"
+        self.publish_fake_joy_button_press(Pin.emergency_button) 
+        self.publish_fake_joy_button_press(Pin.followme_stop_button) 
+    
+    # スピードモードの切替
+    def toggle_speed_mode(self):
+        if self.speed_mode == "low":
+            self.speed_mode = "high"
+            self.red_led.on()
+            self.green_led.off()
+        elif self.speed_mode == "high":
+            self.speed_mode = "low"
+            self.green_led.on()
+            self.red_led.off()
+
+    def handle_speed_mode_toggle(self, button_pressed):
+        if button_pressed:
+            if not self.button_pressed_last:
+                # 新しく押し込みが始まったとき
+                self.press_start_time = time.time()
+                print(f"Button pressed {self.button_pressed_last}", flush=True)
+            if self.press_start_time and (time.time() - self.press_start_time >= 2.0):
+                # 2秒押し続けたらモード切替
+                self.toggle_speed_mode()
+                # 切り替えたのでリセット
+                self.press_start_time = None
+        else:
+            # 押してないならタイマーリセット
+            self.press_start_time = None
+        self.button_pressed_last = button_pressed
+
     # モードに応じた最大デューティ比を返す
     def switch_max_duty(self):
         if self.mode == "follow": return PWM.max_duty_follow
         max_duty = PWM.max_turbo_duty if self.speed_mode == "high" else PWM.max_duty
         return max_duty
+    
+    # cmd_velからデューティ比を計算する
     def convert_cmdvel_to_duty(self, cmd_vel):
         # cmd_velからモータのデューティ比を計算する
         corrected_angular_z = cmd_vel.angular.z * LiDARParam.inverted if self.mode == "follow" else cmd_vel.angular.z
@@ -99,22 +159,7 @@ class TangController(Node):
         duty_l = (motor_rpm_l / Control.max_motor_rpm) * self.switch_max_duty()
         duty_r = (motor_rpm_r / Control.max_motor_rpm) * self.switch_max_duty()
         return duty_l, duty_r
-       
-    # モード切替 
-    def switch_on_callback_follow(self):
-        self.logger.info("追従モード")
-        self.buzzer.on()
-        self.mode = "follow"
-        self.publish_joy(Pin.unlock_emergency_button) 
-        self.publish_joy(Pin.followme_start_button) 
 
-    def switch_on_callback_manual(self):
-        self.logger.info("手動操作")
-        self.buzzer.on()
-        self.mode = "manual"
-        self.publish_joy(Pin.emergency_button) 
-        self.publish_joy(Pin.followme_stop_button) 
-    
     # joystick信号の取得
     def read_analog_pin(self, channel):
         adc = spi.xfer2([1, (8 + channel)<<4, 0])
@@ -126,7 +171,6 @@ class TangController(Node):
         # xが前後方向、マイナスなら後ろ、プラスなら前
         # yがプラスなら左モータ、マイナスなら右モータを回す
         self.buzzer.off()
-        # Read the joystick position data
         # 前後方向
         vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
         # 左右方向
@@ -143,6 +187,8 @@ class TangController(Node):
 
     def start(self):
         while(rclpy.ok()):
+            speed_mode_button_pressed = self.read_analog_pin(Pin.swt_channel) == 0 or self.flag_teleop_speed_mode
+            self.handle_speed_mode_toggle(speed_mode_button_pressed)
             if self.mode == "emergency" or self.obstacle_near: 
                 self.motor.stop()
                 self.logger.info("緊急停止")
