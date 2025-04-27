@@ -38,7 +38,6 @@ class Pin:
     swt_channel  = 2
     adc_bat      = 3
 
-    led_follow = 25
     green_led = 25
     red_led = 26
     buzzer = 2
@@ -50,6 +49,7 @@ class Pin:
     followme_start_button = 7
     followme_stop_button = 8
     teleop_start_button = [0, 1, 2, 3]
+    speed_mode_button = [9,10]
 
 class FOLLOWPID:
     p_gain = 2.307
