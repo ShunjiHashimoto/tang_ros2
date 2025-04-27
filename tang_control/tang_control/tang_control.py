@@ -61,7 +61,10 @@ class TangController(Node):
         self.obstacle_near = any(r < self.threshold_distance for r in msg.ranges)
 
     def cmd_vel_callback(self, cmd_vel):
+        duty_l, duty_r = self.convert_cmdvel_to_duty(cmd_vel)
         print(f"Received cmd_vel: linear.x={cmd_vel.linear.x}, angular.z={cmd_vel.angular.z}", flush=True)
+        print(f"duty_l : {duty_l:.2f}, duty_r : {duty_r:.2f}", flush=True)
+        self.motor.run(duty_r, duty_l)
     
     # joystickのボタンを押したときのコールバック関数
     def publish_joy(self, button_index):
@@ -70,6 +73,22 @@ class TangController(Node):
         msg.buttons = [0] * 12
         msg.buttons[button_index] = 1
         self.joy_pub.publish(msg)
+
+    def convert_cmdvel_to_duty(self, cmd_vel):
+        # cmd_velからモータのデューティ比を計算する
+        v_l = cmd_vel.linear.x - (LiDARParam.inverted * cmd_vel.angular.z) * (Control.tread_width/2) 
+        v_r = cmd_vel.linear.x + (LiDARParam.inverted * cmd_vel.angular.z)  * (Control.tread_width/2)
+        # 車輪の回転数に変換
+        wheel_rpm_l = v_l / (2 * math.pi * Control.wheel_radius) * 60
+        wheel_rpm_r = v_r / (2 * math.pi * Control.wheel_radius) * 60
+        # モータの回転数に変換
+        motor_rpm_l = wheel_rpm_l * Control.gear_ratio
+        motor_rpm_r = wheel_rpm_r * Control.gear_ratio
+        print(f"motor_rpm_l : {motor_rpm_l:.2f}, motor_rpm_r : {motor_rpm_r:.2f}", flush=True)
+        # デューティ比に変換
+        duty_l = (motor_rpm_l / Control.max_motor_rpm) * PWM.max_duty_follow
+        duty_r = (motor_rpm_r / Control.max_motor_rpm) * PWM.max_duty_follow
+        return duty_l, duty_r
        
     # モード切替 
     def switch_on_callback_follow(self):

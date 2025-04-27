@@ -87,6 +87,8 @@ class Control:
     # 最大速度
     max_target_v = 0.3
     max_target_w = 1.0
+    # CuGoV4用
+    max_motor_rpm = 4000
     # joystickの最大値
     max_joystick_val = 1064.0
     velocity_thresh = 1e-2
@@ -118,10 +120,12 @@ class Control:
     radian_1encoder_l = 2*math.pi/encoder_1rotation_l
     # モータの回転数
     rotation_num = 2
-    # トレッド幅[m]
-    tread_width = 0.356
-    # 車輪半径[m]
-    wheel_r = 0.05
+    # トレッド幅[m], V3は0.356
+    tread_width = 0.3
+    # 車輪半径[m], CuGoV3は0.05
+    wheel_radius = 0.03858
+    # CuGoV4のギア比, V3は1.0
+    gear_ratio = 20
     # 車体質量
     M = 24.6
     # 車体慣性モーメント J = ml^2
