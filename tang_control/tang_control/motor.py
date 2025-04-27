@@ -116,9 +116,9 @@ class Motor:
         return
 
     def run(self, duty_r, duty_l):
-        if(abs(duty_r) > 0.2 or abs(duty_l) > 0.2): 
-            print(f"pwm control skipped, because over duty, r,l = {duty_r}, {duty_l}")
-            return
+        # if(abs(duty_r) > 0.2 or abs(duty_l) > 0.2): 
+        #     print(f"pwm control skipped, because over duty, r,l = {duty_r}, {duty_l}")
+        #     return
         if abs(duty_r) < PWM.min_duty and abs(duty_l) < PWM.min_duty:
             # print(f"pwm control stop because low duty")
             self.pwm_control_stop()
