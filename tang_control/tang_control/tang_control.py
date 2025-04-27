@@ -19,6 +19,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.logging import get_logger
+import time
 
 from sensor_msgs.msg import LaserScan, Joy
 from geometry_msgs.msg import Twist
@@ -61,6 +62,8 @@ class TangController(Node):
         self.threshold_distance = 0.3
         # joyトピック 
         self.joy_pub = self.create_publisher(Joy, '/joy', 10)
+        self.joy_subscriber = self.create_subscription(Joy,'/joy', self.joy_callback, 10)
+        
         self.buzzer = LED(Pin.buzzer)
         self.mode = "manual"
         self.obstacle_near = False
@@ -80,6 +83,10 @@ class TangController(Node):
     def joy_callback(self, msg):
         if any(msg.buttons[i] == 1 for i in Pin.teleop_start_button):
             self.mode = "teleop"
+        if any(msg.buttons[i] == 1 for i in Pin.speed_mode_button):
+            self.flag_teleop_speed_mode = True
+        else:
+            self.flag_teleop_speed_mode = False
 
     def cmd_vel_callback(self, cmd_vel):
         duty_l, duty_r = self.convert_cmdvel_to_duty(cmd_vel)
