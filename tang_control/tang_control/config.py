@@ -132,8 +132,6 @@ class Control:
     # 車体慣性モーメント J = ml^2
     # J = 1/3(a^2 + b^2) 44cm, 40cm = 0.58999
     J = M*(0.22*0.22 + 0.2*0.2)/3
-    # CuGoV3のギア比
-    gear_ratio = 1.0
     # ブラシレスモータの電圧とモータ回転数[rpm]の関係, 4.5Vで4000[r/min]よりy = 4.5/4000x = 0.001125x
     volt_and_rpm_gain = 0.01125
     #volt_and_rpm_gain = 0.02125 # DCモータ設定
