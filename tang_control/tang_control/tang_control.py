@@ -20,8 +20,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.logging import get_logger
 
-from icart_mini_leg_tracker.msg import ClusterInfo, ClusterInfoArray 
 from sensor_msgs.msg import LaserScan, Joy
+from geometry_msgs.msg import Twist
 from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control
 from tang_control.motor import Motor
 from gpiozero import Button, LED 
@@ -48,11 +48,10 @@ class TangController(Node):
         self.led = LED(Pin.red_led)
         self.buzzer = LED(Pin.buzzer)
         self.mode = "manual"
-        self.target_cluster_list = []
         self.obstacle_near = False
         # LiDARデータのサブスクライブ
         self.lidar_subscription = self.create_subscription(LaserScan,'/scan',self.lidar_callback,10)
-        self.subscription = self.create_subscription(ClusterInfoArray, '/leg_tracker/cluster_infos', self.follow_target_callback, 10)
+        self.cmd_vel_subscription = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
         self.threshold_distance = 0.3
         # joyトピック 
         self.joy_pub = self.create_publisher(Joy, 'joy', 10)
@@ -61,15 +60,8 @@ class TangController(Node):
         # LiDARの点群データをチェック
         self.obstacle_near = any(r < self.threshold_distance for r in msg.ranges)
 
-    def follow_target_callback(self, msg):
-        self.target_cluster_list.clear()
-        for cluster in msg.clusters:
-            # 追従対象者の位置を取得
-            if cluster.is_target:
-                self.target_cluster_list.append(cluster)
-                print(f"追従対象者の位置: x={cluster.center.x}, y={cluster.center.y}")
-        # print(f"person x: {msg.pose.position.x}, y: {msg.pose.position.y}", flush=True)
-        # -1.2 ~ 1.2 でyは変わる、またxも0 ~ 1.2で変わる
+    def cmd_vel_callback(self, cmd_vel):
+        print(f"Received cmd_vel: linear.x={cmd_vel.linear.x}, angular.z={cmd_vel.angular.z}", flush=True)
     
     # joystickのボタンを押したときのコールバック関数
     def publish_joy(self, button_index):
@@ -139,19 +131,6 @@ class TangController(Node):
 
     def follow_control(self):
         self.buzzer.off()
-        # if(self.follow_target_person.pose.position.x < 0.3):
-        #     self.motor.pwm_control_stop()
-        # target_v, target_w = self.calc_vw_by_humanpos(self.follow_target_person.pose.position.x-0.15, self.follow_target_person.pose.position.y)
-        # print(f"target_v : {target_v:.2f}, target_w : {target_w:.2f}")
-
-        # if hasattr(self, 'follow_target_person') and self.follow_target_person is not None:
-            # duty_r, duty_l = self.motor.calc_duty_by_vw(target_v, target_w)
-            # print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
-            # self.motor.run(duty_r, duty_l)
-            # DCモータの設定
-            #self.motor.run(duty_l, duty_r)
-        # else:
-            # self.logger.warning('No follow target person data available.')
         return
 
     def start(self):
