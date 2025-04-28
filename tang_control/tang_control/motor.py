@@ -45,7 +45,7 @@ class Motor:
             if(joystick_x > 0): # 右回転, ただし左車輪をより回し、右車輪はゆっくり回す
                 duty_l = -PWM.turn_const_duty_l if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
                 duty_r = -abs(((max_duty - normarized_x)/max_duty)*normarized_y)
-            if(joystick_y <= 0): # 左回転、ただし右車輪をより回し、左車輪はゆっくり回す
+                print(f"右後退回転;r {duty_r}, l {duty_l}", flush=True)
                 duty_r = -PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
                 duty_l = -abs(((max_duty + normarized_x)/max_duty)*normarized_y)
             
