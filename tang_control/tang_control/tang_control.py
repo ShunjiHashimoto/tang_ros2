@@ -56,6 +56,7 @@ class TangController(Node):
         self.press_start_time = None  # 押し込み開始時刻
         self.button_pressed_last = False  # 前回の押し状態
         self.flag_teleop_speed_mode = False
+        self.last_cmd_vel_time = time.time() 
 
         # LiDARデータのサブスクライブ
         self.lidar_subscription = self.create_subscription(LaserScan,'/scan',self.lidar_callback,10)
