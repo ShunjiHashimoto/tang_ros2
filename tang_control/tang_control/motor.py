@@ -61,9 +61,10 @@ class Motor:
         return duty_r, duty_l
 
     # cmd_velからモータの回転数を計算する
-    def convert_cmdvel_to_rpm(self, cmd_vel, max_duty, mode):
+    def convert_cmdvel_to_rpm(self, cmd_vel, mode):
         normarized_linear_x = self.normalize_joystick_input(cmd_vel.linear.x, max_value=-1, prev_value=self.prev_normalized_linear_x)
-        normarized_angular_z = self.normalize_joystick_input(cmd_vel.angular_z, max_value=-1, prev_value=self.prev_normalized_angular_z)
+        normarized_angular_z = self.normalize_joystick_input(cmd_vel.angular.z, max_value=-1, prev_value=self.prev_normalized_angular_z)
+        # print(f"cmd_vel: linear.x={cmd_vel.linear.x:.2f}, angular.z={cmd_vel.angular.z:.2f}, normarized_linear_x={normarized_linear_x:.2f}, normalized_angular_z={normarized_angular_z:.2f}", flush=True)
         # 現在の値を保存しておく
         self.prev_normalized_linear_x = normarized_linear_x
         self.prev_normalized_angular_z = normarized_angular_z
