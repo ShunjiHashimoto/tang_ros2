@@ -90,11 +90,9 @@ class Control:
     # 最大速度
     max_target_v = 0.3
     max_target_w = 1.0
+    velocity_thresh = 1e-2
     # CuGoV4用
     max_motor_rpm = 4000
-    # joystickの最大値
-    max_joystick_val = 1064.0
-    velocity_thresh = 1e-2
     # 入力電圧
     input_v = 26.1
     # 目標角速度
@@ -145,3 +143,8 @@ class HumanFollowParam:
 
 class LiDARParam:
     inverted = -1
+
+class JoyParam:
+    # joystickの最大値
+    max_joystick_val = 1064.0
+    ema_alpha = 0.1  # EMAの平滑化係数。0に近いほど変化が緩やか

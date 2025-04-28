@@ -5,7 +5,7 @@ import time
 import math
 from datetime import datetime
 from gpiozero import LED, PWMOutputDevice
-from tang_control.config import Pin, PID, PWM, Control, LiDARParam
+from tang_control.config import Pin, PID, PWM, Control, LiDARParam, JoyParam
 
 class Motor:
     def __init__(self):
@@ -18,13 +18,14 @@ class Motor:
         # 過去のジョイスティック入力を記憶するための変数を追加
         self.prev_normalized_value_x = 0
         self.prev_normalized_value_y = 0
-        self.alpha = 0.1  # EMAの平滑化係数。0に近いほど変化が緩やか
+        self.prev_normalized_linear_x = 0
+        self.prev_normalized_angular_z = 0
     
     def normalize_joystick_input(self, value, max_value=PWM.max_duty, prev_value=0):
         # ジョイスティック入力を正規化
-        normalized_value = value * max_value
+        normalized_value = value * max_value if max_value > 0 else value
         # 平滑化された値を計算
-        smoothed_value = self.alpha * normalized_value + (1 - self.alpha) * prev_value
+        smoothed_value = JoyParam.ema_alpha * normalized_value + (1 - JoyParam.ema_alpha) * prev_value
         return smoothed_value
     
     # xが前後、yが左右、左が＋
@@ -60,11 +61,16 @@ class Motor:
         return duty_r, duty_l
 
     # cmd_velからモータの回転数を計算する
-    def convert_cmdvel_to_rpm(self, cmd_vel, mode):
+    def convert_cmdvel_to_rpm(self, cmd_vel, max_duty, mode):
+        normarized_linear_x = self.normalize_joystick_input(cmd_vel.linear.x, max_value=-1, prev_value=self.prev_normalized_linear_x)
+        normarized_angular_z = self.normalize_joystick_input(cmd_vel.angular_z, max_value=-1, prev_value=self.prev_normalized_angular_z)
+        # 現在の値を保存しておく
+        self.prev_normalized_linear_x = normarized_linear_x
+        self.prev_normalized_angular_z = normarized_angular_z
         # cmd_velからモータのデューティ比を計算する
-        corrected_angular_z = cmd_vel.angular.z * LiDARParam.inverted if mode == "follow" else cmd_vel.angular.z
-        v_l = cmd_vel.linear.x - corrected_angular_z * (Control.tread_width/2) 
-        v_r = cmd_vel.linear.x + corrected_angular_z  * (Control.tread_width/2)
+        corrected_angular_z = normarized_angular_z * LiDARParam.inverted if mode == "follow" else normarized_angular_z
+        v_l = normarized_linear_x - corrected_angular_z * (Control.tread_width/2) 
+        v_r = normarized_linear_x + corrected_angular_z  * (Control.tread_width/2)
         # 車輪の回転数に変換
         wheel_rpm_l = v_l / (2 * math.pi * Control.wheel_radius) * 60
         wheel_rpm_r = v_r / (2 * math.pi * Control.wheel_radius) * 60
@@ -136,10 +142,18 @@ class Motor:
         else:
             self.pwm_control_l_FWD(abs(duty_l))
         return
+    
+    def reset_settings(self):
+        self.prev_normalized_value_x = 0.0
+        self.prev_normalized_value_y = 0.0
+        self.prev_normalized_linear_x = 0.0
+        self.prev_normalized_angular_z = 0.0
+        return
         
     def stop(self):
         self.l_pwm.value = 0.0
         self.r_pwm.value = 0.0
+        self.reset_settings()
 
 def main():
     # 目標速度

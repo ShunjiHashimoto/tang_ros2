@@ -23,7 +23,7 @@ import time
 
 from sensor_msgs.msg import LaserScan, Joy
 from geometry_msgs.msg import Twist
-from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control, LiDARParam
+from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control, LiDARParam, JoyParam
 from tang_control.motor import Motor
 from gpiozero import Button, LED 
 import spidev
@@ -50,6 +50,7 @@ class TangController(Node):
         self.green_led = LED(Pin.green_led)
         self.green_led.on()
         self.mode = "manual"
+        self.prev_mode = None
         self.speed_mode = "low"
         self.obstacle_near = False
         self.press_start_time = None  # 押し込み開始時刻
@@ -162,9 +163,9 @@ class TangController(Node):
         # yがプラスなら左モータ、マイナスなら右モータを回す
         self.buzzer.off()
         # 前後方向
-        vry_pos = self.read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val*2 - 1  # normalize to [-1, 1]
+        vry_pos = self.read_analog_pin(Pin.vrx_channel) / JoyParam.max_joystick_val*2 - 1  # normalize to [-1, 1]
         # 左右方向
-        vrx_pos = self.read_analog_pin(Pin.vry_channel) / Control.max_joystick_val*2 - 1   
+        vrx_pos = self.read_analog_pin(Pin.vry_channel) / JoyParam.max_joystick_val*2 - 1   
         # print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
         duty_r, duty_l = self.motor.convert_joyinput_to_duty(vrx_pos, vry_pos, self.switch_max_duty())
         # print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
@@ -175,10 +176,15 @@ class TangController(Node):
         self.buzzer.off()
         return
 
+    def check_mode_change(self):
+        if self.mode != self.prev_mode: self.motor.reset_settings()
+        self.prev_mode = self.mode
+
     def start(self):
         while(rclpy.ok()):
             speed_mode_button_pressed = self.read_analog_pin(Pin.swt_channel) == 0 or self.flag_teleop_speed_mode
             self.handle_speed_mode_toggle(speed_mode_button_pressed)
+            self.check_mode_change()
             if self.mode == "emergency" or self.obstacle_near: 
                 self.motor.stop()
                 self.logger.info("緊急停止")
