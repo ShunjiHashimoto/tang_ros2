@@ -182,7 +182,7 @@ class TangController(Node):
 
     def start(self):
         while(rclpy.ok()):
-            speed_mode_button_pressed = self.read_analog_pin(Pin.swt_channel) == 0 or self.flag_teleop_speed_mode
+            speed_mode_button_pressed = True if self.read_analog_pin(Pin.swt_channel) == 0 or self.flag_teleop_speed_mode else False
             self.handle_speed_mode_toggle(speed_mode_button_pressed)
             self.check_mode_change()
             if self.mode == "emergency" or self.obstacle_near: 
