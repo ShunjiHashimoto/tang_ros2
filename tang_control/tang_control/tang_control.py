@@ -84,16 +84,29 @@ class TangController(Node):
     def joy_callback(self, msg):
         if any(msg.buttons[i] == 1 for i in Pin.teleop_start_button):
             self.mode = "teleop"
-        if any(msg.buttons[i] == 1 for i in Pin.speed_mode_button):
-            self.flag_teleop_speed_mode = True
-        else:
-            self.flag_teleop_speed_mode = False
+        self.flag_teleop_speed_mode = True if any(msg.buttons[i] == 1 for i in Pin.speed_mode_button) else False
+        # print(f"teleop_start_button: {msg.buttons[Pin.teleop_start_button[0]]}, speed_mode_button: {msg.buttons[Pin.speed_mode_button[0]]}", flush=True)
+    
+    def normalize_joystick_input(self, value, max_value=PWM.max_duty, prev_value=0):
+        # ジョイスティック入力を正規化
+        normalized_value = value * max_value if max_value > 0 else value
+        # 平滑化された値を計算
+        smoothed_value = JoyParam.ema_alpha * normalized_value + (1 - JoyParam.ema_alpha) * prev_value
+        return smoothed_value
 
     def cmd_vel_callback(self, cmd_vel):
-        motor_rpm_l, motor_rpm_r = self.motor.convert_cmdvel_to_rpm(cmd_vel, self.mode)
+        self.last_cmd_vel_time = time.time() 
+        # cmd_velの値を正規化
+        normarized_linear_x = self.normalize_joystick_input(cmd_vel.linear.x, max_value=-1, prev_value=self.motor.prev_normalized_linear_x)
+        normarized_angular_z = self.normalize_joystick_input(cmd_vel.angular.z, max_value=-1, prev_value=self.motor.prev_normalized_angular_z)
+        self.motor.update_prev_value_vw(normarized_linear_x, normarized_angular_z)
+        # 目標回転数を計算
+        motor_rpm_l, motor_rpm_r = self.motor.convert_cmdvel_to_rpm(normarized_linear_x, normarized_angular_z, self.mode)
+        # デューティ比に変換
         duty_l, duty_r = self.motor.convert_rpm_to_duty(motor_rpm_l, motor_rpm_r, self.switch_max_duty())
-        # print(f"Received cmd_vel: linear.x={cmd_vel.linear.x}, angular.z={cmd_vel.angular.z}", flush=True)
+        print(f"Received cmd_vel: linear.x={cmd_vel.linear.x:.2f}, angular.z={cmd_vel.angular.z:.2f}", flush=True)
         # print(f"duty_l : {duty_l:.2f}, duty_r : {duty_r:.2f}", flush=True)
+        # モータに指令
         self.motor.run(duty_r, duty_l)
     
     def publish_fake_joy_button_press(self, button_index):
@@ -134,7 +147,6 @@ class TangController(Node):
             if not self.button_pressed_last:
                 # 新しく押し込みが始まったとき
                 self.press_start_time = time.time()
-                print(f"Button pressed {self.button_pressed_last}", flush=True)
             if self.press_start_time and (time.time() - self.press_start_time >= 2.0):
                 # 2秒押し続けたらモード切替
                 self.toggle_speed_mode()
@@ -166,9 +178,12 @@ class TangController(Node):
         vry_pos = self.read_analog_pin(Pin.vrx_channel) / JoyParam.max_joystick_val*2 - 1  # normalize to [-1, 1]
         # 左右方向
         vrx_pos = self.read_analog_pin(Pin.vry_channel) / JoyParam.max_joystick_val*2 - 1   
-        # print(f"Normalized joystick position X : {vrx_pos:.2f}, Normalized Y : {vry_pos:.2f}")
-        duty_r, duty_l = self.motor.convert_joyinput_to_duty(vrx_pos, vry_pos, self.switch_max_duty())
-        # print(f"duty_r : {duty_r:.2f}, duty_l : {duty_l:.2f}")
+        # xyの値を正規化
+        normarized_x = self.normalize_joystick_input(vrx_pos, max_value=self.switch_max_duty(), prev_value=self.motor.prev_normalized_value_x)
+        normarized_y = self.normalize_joystick_input(vry_pos, max_value=self.switch_max_duty(), prev_value=self.motor.prev_normalized_value_y)
+        self.motor.update_prev_value_xy(normarized_x, normarized_y)
+        # duty比に変換
+        duty_r, duty_l = self.motor.convert_joyinput_to_duty(vrx_pos, vry_pos, normarized_x, normarized_y, self.switch_max_duty())
         self.motor.run(duty_r, duty_l)
         return
     
@@ -191,10 +206,13 @@ class TangController(Node):
                 # self.mode = "manual"
             elif self.mode == "follow":
                 self.follow_control()
+                if time.time() - self.last_cmd_vel_time > 0.5:
+                    self.motor.stop()
             elif self.mode == "manual":
                 self.manual_pwm_control()
             elif self.mode == "teleop":
-                print(f"mode: {self.mode}")
+                if time.time() - self.last_cmd_vel_time > 0.5:
+                    self.motor.stop()
             else:
                 print("Something wrong, Please check curretn mode")
             rclpy.spin_once(self, timeout_sec=0.1)
