@@ -5,7 +5,7 @@ import time
 import math
 from datetime import datetime
 from gpiozero import LED, PWMOutputDevice
-from tang_control.config import Pin, PID, PWM, Control
+from tang_control.config import Pin, PID, PWM, Control, LiDARParam
 
 class Motor:
     def __init__(self):
@@ -28,7 +28,7 @@ class Motor:
         return smoothed_value
     
     # xが前後、yが左右、左が＋
-    def calc_duty_by_joyinput(self, joystick_x, joystick_y, max_duty):
+    def convert_joyinput_to_duty(self, joystick_x, joystick_y, max_duty):
         normarized_x = self.normalize_joystick_input(joystick_x, max_value=max_duty, prev_value=self.prev_normalized_value_x)
         normarized_y = self.normalize_joystick_input(joystick_y, max_value=max_duty, prev_value=self.prev_normalized_value_y)
         # 現在の値を保存しておく
@@ -54,37 +54,44 @@ class Motor:
                 duty_r = -PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
                 duty_l = -abs(((max_duty + normarized_x)/max_duty)*normarized_y)
             
-        print(f"duty_r: {duty_r:.2f}, duty_l: {duty_l:.2f}", flush=True)
+        # print(f"duty_r: {duty_r:.2f}, duty_l: {duty_l:.2f}", flush=True)
         duty_l = max(min(duty_l, max_duty), -max_duty)
         duty_r = max(min(duty_r, max_duty), -max_duty)
         return duty_r, duty_l
 
-    def calc_robot_vel_command(self, joystick_x, joystick_y):
-        target_v = self.normalize_joystick_input(joystick_y, Control.max_target_v)
-        target_w = self.normalize_joystick_input(joystick_x, Control.max_target_w)
-        return target_v, target_w
-    
-    def calc_motor_speed(self, target_v, target_w):
-        vel_r = target_v + target_w * Control.tread_width/2
-        vel_l = target_v - target_w * Control.tread_width/2
-        rotation_speed_r = (vel_r/Control.wheel_r)*Control.gear_ratio*60/(2*math.pi)
-        rotation_speed_l = (vel_l/Control.wheel_r)*Control.gear_ratio*60/(2*math.pi)
-        return rotation_speed_r, rotation_speed_l
-    
-    def calc_duty_by_vw(self, target_v, target_w):
-        rotation_speed_r, rotation_speed_l = self.calc_motor_speed(target_v, target_w)
-        volt_r = Control.volt_and_rpm_gain*rotation_speed_r
-        volt_l = Control.volt_and_rpm_gain*rotation_speed_l
-        duty_r = volt_r/Control.src_volt
-        duty_l = volt_l/Control.src_volt
-        return duty_r, duty_l
-        
+    # cmd_velからモータの回転数を計算する
+    def convert_cmdvel_to_rpm(self, cmd_vel, mode):
+        # cmd_velからモータのデューティ比を計算する
+        corrected_angular_z = cmd_vel.angular.z * LiDARParam.inverted if mode == "follow" else cmd_vel.angular.z
+        v_l = cmd_vel.linear.x - corrected_angular_z * (Control.tread_width/2) 
+        v_r = cmd_vel.linear.x + corrected_angular_z  * (Control.tread_width/2)
+        # 車輪の回転数に変換
+        wheel_rpm_l = v_l / (2 * math.pi * Control.wheel_radius) * 60
+        wheel_rpm_r = v_r / (2 * math.pi * Control.wheel_radius) * 60
+        # モータの回転数に変換
+        motor_rpm_l = wheel_rpm_l * Control.gear_ratio
+        motor_rpm_r = wheel_rpm_r * Control.gear_ratio
+        return motor_rpm_l, motor_rpm_r
+
+    # モータの回転数からデューティ比を計算する
+    def convert_rpm_to_duty(self, motor_rpm_l, motor_rpm_r, max_duty):
+        # デューティ比に変換
+        duty_l = (motor_rpm_l / Control.max_motor_rpm) * max_duty
+        duty_r = (motor_rpm_r / Control.max_motor_rpm) * max_duty
+        # DCモータ用
+        # volt_r = Control.volt_and_rpm_gain*motor_rpm_r
+        # volt_l = Control.volt_and_rpm_gain*motor_rpm_l
+        # duty_r = volt_r/Control.src_volt
+        # duty_l = volt_l/Control.src_volt
+        return duty_l, duty_r
+
     def pwm_control_r_FWD(self, duty):
         self.r_FWD.on()
         #self.r_FWD.off()
         self.r_REV.off()
         self.r_pwm.value = duty
         return
+
     def pwm_control_r_REV(self, duty):
         #self.r_FWD.on()
         self.r_FWD.off()
