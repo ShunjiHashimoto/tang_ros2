@@ -36,18 +36,22 @@ class Motor:
         # 論理はjoystickのx,yの値をそのまま使い、制御にはnormarized_x,yを使う
         if(joystick_y >= -0.15): # 前進（y>0）
             if(joystick_x > 0): # 右回転
-                duty_l = PWM.turn_const_duty_l if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
+                duty_l = PWM.turn_const_duty_l if (abs(joystick_y) < 0.1 and abs(joystick_x) > 0.85) else normarized_y
                 duty_r = ((max_duty - normarized_x)/max_duty)*normarized_y
+                # print(f"右前進回転: r {duty_r}, l {duty_l}", flush=True)
             if(joystick_x <= 0): # 左回転
                 duty_l = ((max_duty + normarized_x)/max_duty)*normarized_y
-                duty_r = PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
+                duty_r = PWM.turn_const_duty_r if (abs(joystick_y) < 0.1 and abs(joystick_x) > 0.85) else normarized_y
+                # print(f"左前進回転:r {duty_r}, l {duty_l}", flush=True)
         elif(joystick_y < -0.15): # 後退（y<0）
             if(joystick_x > 0): # 右回転, ただし左車輪をより回し、右車輪はゆっくり回す
                 duty_l = -PWM.turn_const_duty_l if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
                 duty_r = -abs(((max_duty - normarized_x)/max_duty)*normarized_y)
-                print(f"右後退回転;r {duty_r}, l {duty_l}", flush=True)
+                # print(f"右後退回転;r {duty_r}, l {duty_l}", flush=True)
+            if(joystick_x <= 0): # 左回転、ただし右車輪をより回し、左車輪はゆっくり回す
                 duty_r = -PWM.turn_const_duty_r if (abs(joystick_y) < 0.05 and abs(joystick_x) > 0.85) else normarized_y
                 duty_l = -abs(((max_duty + normarized_x)/max_duty)*normarized_y)
+                # print(f"左後退回転;r {duty_r}, l {duty_l}", flush=True)
             
         duty_l = max(min(duty_l, max_duty), -max_duty)
         duty_r = max(min(duty_r, max_duty), -max_duty)
