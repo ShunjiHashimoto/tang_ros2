@@ -84,7 +84,7 @@ class TangController(Node):
         # ジョイスティック入力を正規化
         normalized_value = value * max_value if max_value > 0 else value
         # 平滑化された値を計算
-        smoothed_value = JoyParam.ema_alpha * normalized_value + (1 - JoyParam.ema_alpha) * prev_value
+        smoothed_value = JoyParam.ema_alpha * normalized_value + (1 - JoyParam.ema_alpha) * prev_value if max_value >0 else value
         return smoothed_value
 
     def cmd_vel_callback(self, cmd_vel):
