@@ -61,7 +61,6 @@ class TangController(Node):
         # LiDARデータのサブスクライブ
         self.lidar_subscription = self.create_subscription(LaserScan,'/scan',self.lidar_callback,10)
         self.cmd_vel_subscription = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
-        self.threshold_distance = 0.3
         # joyトピック 
         self.joy_pub = self.create_publisher(Joy, '/joy', 10)
         self.joy_subscriber = self.create_subscription(Joy,'/joy', self.joy_callback, 10)
@@ -69,18 +68,11 @@ class TangController(Node):
         self.buzzer = LED(Pin.buzzer)
         self.mode = "manual"
         self.obstacle_near = False
-        # LiDARデータのサブスクライブ
-        self.lidar_subscription = self.create_subscription(LaserScan,'/scan',self.lidar_callback,10)
-        self.cmd_vel_subscription = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
-        self.threshold_distance = 0.3
-        # joyトピック 
-        self.joy_pub = self.create_publisher(Joy, '/joy', 10)
-        self.joy_subscriber = self.create_subscription(Joy,'/joy', self.joy_callback, 10)
         
     # Publish and Subscribe 
     def lidar_callback(self, msg):
         # LiDARの点群データをチェック
-        self.obstacle_near = any(r < self.threshold_distance for r in msg.ranges)
+        self.obstacle_near = any(r < LiDARParam.stop_distance_thresh for r in msg.ranges)
     
     def joy_callback(self, msg):
         if any(msg.buttons[i] == 1 for i in Pin.teleop_start_button):

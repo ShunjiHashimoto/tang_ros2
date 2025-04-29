@@ -143,6 +143,7 @@ class HumanFollowParam:
 
 class LiDARParam:
     inverted = -1
+    stop_distance_thresh = 0.1
 
 class JoyParam:
     # joystickの最大値
