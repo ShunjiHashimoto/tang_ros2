@@ -98,7 +98,7 @@ class TangController(Node):
         # デューティ比に変換
         duty_l, duty_r = self.motor.convert_rpm_to_duty(motor_rpm_l, motor_rpm_r, self.switch_max_duty())
         print(f"Received cmd_vel: linear.x={cmd_vel.linear.x:.2f}, angular.z={cmd_vel.angular.z:.2f}", flush=True)
-        # print(f"duty_l : {duty_l:.2f}, duty_r : {duty_r:.2f}", flush=True)
+        print(f"duty_l : {duty_l:.2f}, duty_r : {duty_r:.2f}", flush=True)
         # モータに指令
         self.motor.run(duty_r, duty_l)
     
@@ -140,7 +140,7 @@ class TangController(Node):
             if not self.button_pressed_last:
                 # 新しく押し込みが始まったとき
                 self.press_start_time = time.time()
-            if self.press_start_time and (time.time() - self.press_start_time >= 2.0):
+            if self.press_start_time and (time.time() - self.press_start_time >= 1.0):
                 # 2秒押し続けたらモード切替
                 self.toggle_speed_mode()
                 # 切り替えたのでリセット
