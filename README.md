@@ -86,4 +86,27 @@ colcon build --symlink-install --packages-select tang_control
 ## ▶️ 実行方法
 
 ```bash
-ros2 run tang_control tang_control
+ubuntu@raspi5:/etc/systemd/system$ cat startup_raspi.service 
+[Unit]
+Description=Start TANG ROS2 docker container with ROS2 launch
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Restart=always
+ExecStart=/home/ubuntu/icart_ws/src/tang_ros2/shell_scripts/auto_start.sh
+WorkingDirectory=/home/ubuntu/icart_ws/src/tang_ros2/shell_scripts
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.targetros2 run tang_control tang_control
+```
+
+ログ確認
+```bash
+journalctl -u startup_raspi.service -f
+```
+停止
+```bash
+sudo systemctl stop startup_raspi.service
+```
