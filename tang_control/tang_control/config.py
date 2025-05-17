@@ -71,9 +71,9 @@ class PID:
 class PWM:
     # PWM周波数をHzで指定
     frequency = 500 # [Hz]
-    max_duty = 0.15
-    max_turbo_duty = 0.3
-    max_duty_follow = 0.2
+    max_duty = 0.3
+    max_turbo_duty = 0.4
+    max_duty_follow = 0.4
     min_duty = 0.05
     turn_const_duty_r = 0.1 # 右車輪の定数デューティ比, 超信地旋回時
     turn_const_duty_l = 0.1 # 左車輪の定数デューティ比
