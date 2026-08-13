@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""ハードウェアを使わずにTANG統合制御の基本ロジックを確認する。"""
+
+import unittest
+
+from cugo_rs485_motor_control.bridge import (
+    MotorBridgeConfig,
+    Rs485DualMotorBridge,
+)
+from tang_control.config import Control
+from tang_control.controller_core import (
+    FOLLOW,
+    HIGH,
+    IDLE,
+    LOW,
+    MANUAL,
+    TangControlState,
+    TangControlRuntime,
+    joystick_to_body_velocity,
+    normalize_axis,
+)
+
+
+class TangControlStateTest(unittest.TestCase):
+    def test_startup_is_idle_and_low(self):
+        state = TangControlState()
+        self.assertEqual(IDLE, state.mode)
+        self.assertEqual(LOW, state.speed_mode)
+
+    def test_manual_transition_resets_speed_to_low(self):
+        state = TangControlState(mode=FOLLOW, speed_mode=HIGH)
+        self.assertTrue(state.select_mode(MANUAL))
+        self.assertEqual(MANUAL, state.mode)
+        self.assertEqual(LOW, state.speed_mode)
+
+    def test_reselecting_current_mode_is_ignored(self):
+        state = TangControlState(mode=MANUAL)
+        self.assertFalse(state.select_mode(MANUAL))
+
+    def test_speed_buttons_only_act_on_new_press_in_manual(self):
+        state = TangControlState()
+
+        # MANUAL以外で押された高速ボタンは記憶するが、速度には反映しない。
+        self.assertFalse(state.update_speed_buttons(False, True))
+        state.select_mode(MANUAL)
+        self.assertFalse(state.update_speed_buttons(False, True))
+        self.assertEqual(LOW, state.speed_mode)
+
+        state.update_speed_buttons(False, False)
+        self.assertTrue(state.update_speed_buttons(False, True))
+        self.assertEqual(HIGH, state.speed_mode)
+
+        state.update_speed_buttons(False, False)
+        self.assertTrue(state.update_speed_buttons(True, False))
+        self.assertEqual(LOW, state.speed_mode)
+
+    def test_simultaneous_speed_press_is_ignored(self):
+        state = TangControlState(mode=MANUAL, speed_mode=HIGH)
+        self.assertFalse(state.update_speed_buttons(True, True))
+        self.assertEqual(HIGH, state.speed_mode)
+
+    def test_single_button_after_simultaneous_press_is_accepted(self):
+        state = TangControlState(mode=MANUAL, speed_mode=LOW)
+        self.assertFalse(state.update_speed_buttons(True, True))
+        self.assertTrue(state.update_speed_buttons(False, True))
+        self.assertEqual(HIGH, state.speed_mode)
+
+    def test_speed_button_baseline_does_not_select_speed(self):
+        state = TangControlState(mode=MANUAL, speed_mode=LOW)
+        state.remember_speed_buttons(False, True)
+        self.assertFalse(state.update_speed_buttons(False, True))
+        self.assertEqual(LOW, state.speed_mode)
+
+
+class JoystickConversionTest(unittest.TestCase):
+    def test_center_and_deadband_are_zero(self):
+        self.assertEqual(0.0, normalize_axis(500, 70, 500, 960))
+        self.assertEqual(0.0, normalize_axis(535, 70, 500, 960))
+        self.assertEqual(0.0, normalize_axis(465, 70, 500, 960))
+        self.assertEqual((0.0, 0.0), joystick_to_body_velocity(500, 500, LOW))
+
+    def test_low_and_high_limits(self):
+        low_v, low_w = joystick_to_body_velocity(70, 960, LOW)
+        high_v, high_w = joystick_to_body_velocity(70, 960, HIGH)
+        self.assertAlmostEqual(Control.manual_low_max_v_mps, low_v)
+        self.assertAlmostEqual(Control.manual_low_max_w_radps, low_w)
+        self.assertAlmostEqual(Control.manual_high_max_v_mps, high_v)
+        self.assertAlmostEqual(Control.manual_high_max_w_radps, high_w)
+
+    def test_axes_are_clamped(self):
+        v, w = joystick_to_body_velocity(2000, -100, HIGH)
+        self.assertAlmostEqual(-Control.manual_high_max_v_mps, v)
+        self.assertAlmostEqual(-Control.manual_high_max_w_radps, w)
+
+
+class ProvenBridgeIntegrationTest(unittest.TestCase):
+    def setUp(self):
+        self.bridge = Rs485DualMotorBridge(
+            port="/dev/ttyUSB0",
+            baudrate=9600,
+            timeout=0.3,
+            left_slave=2,
+            right_slave=1,
+            config=MotorBridgeConfig(
+                op_no=2,
+                wheel_radius_left=Control.wheel_radius_left,
+                wheel_radius_right=Control.wheel_radius_right,
+                tread=Control.tread,
+                reduction_ratio=Control.reduction_ratio,
+                max_rpm=Control.rs485_max_motor_rpm,
+                min_rpm=Control.rs485_min_motor_rpm,
+                anti_creep_start_rpm=Control.anti_creep_start_rpm,
+                left_motor_sign=-1,
+                right_motor_sign=1,
+                deceleration_stop=True,
+            ),
+            dry_run=True,
+        )
+
+    def tearDown(self):
+        self.bridge.close()
+
+    def test_forward_command_uses_proven_motor_signs(self):
+        _, _, left_rpm, right_rpm = self.bridge.apply_body_velocity(0.15, 0.0)
+        self.assertLess(left_rpm, 0.0)
+        self.assertGreater(right_rpm, 0.0)
+        self.assertAlmostEqual(abs(left_rpm), abs(right_rpm))
+
+    def test_zero_and_small_start_command_stop(self):
+        self.bridge.stop(force=True)
+        self.assertEqual(
+            (0.0, 0.0),
+            self.bridge.apply_body_velocity(0.0, 0.0)[2:],
+        )
+        self.assertEqual(
+            (0.0, 0.0),
+            self.bridge.apply_body_velocity(0.001, 0.0)[2:],
+        )
+
+    def test_motor_rpm_is_limited(self):
+        _, _, left_rpm, right_rpm = self.bridge.apply_body_velocity(10.0, 0.0)
+        self.assertLessEqual(abs(left_rpm), Control.rs485_max_motor_rpm)
+        self.assertLessEqual(abs(right_rpm), Control.rs485_max_motor_rpm)
+
+
+class FakeBridge:
+    def __init__(self):
+        self.calls = []
+
+    def stop(self, force=False):
+        self.calls.append(("stop", force))
+
+    def apply_body_velocity(self, v, w):
+        self.calls.append(("velocity", v, w))
+        return v, w, -100.0, 100.0
+
+
+class TangControlRuntimeTest(unittest.TestCase):
+    def test_mode_change_stops_before_selecting_manual(self):
+        bridge = FakeBridge()
+        runtime = TangControlRuntime(bridge)
+        self.assertTrue(runtime.select_mode(MANUAL))
+        self.assertEqual([("stop", True)], bridge.calls)
+        self.assertEqual(MANUAL, runtime.state.mode)
+        self.assertEqual(LOW, runtime.state.speed_mode)
+
+    def test_same_mode_does_not_send_another_stop(self):
+        bridge = FakeBridge()
+        runtime = TangControlRuntime(
+            bridge,
+            TangControlState(mode=MANUAL),
+        )
+        self.assertFalse(runtime.select_mode(MANUAL))
+        self.assertEqual([], bridge.calls)
+
+    def test_idle_never_applies_manual_velocity(self):
+        bridge = FakeBridge()
+        runtime = TangControlRuntime(bridge)
+        self.assertIsNone(runtime.apply_manual_input(70, 960))
+        self.assertEqual([("stop", False)], bridge.calls)
+
+    def test_manual_applies_limited_joystick_request(self):
+        bridge = FakeBridge()
+        runtime = TangControlRuntime(
+            bridge,
+            TangControlState(mode=MANUAL, speed_mode=LOW),
+        )
+        result = runtime.apply_manual_input(70, 960)
+        self.assertAlmostEqual(Control.manual_low_max_v_mps, result[0])
+        self.assertAlmostEqual(Control.manual_low_max_w_radps, result[1])
+        self.assertEqual("velocity", bridge.calls[0][0])
+
+
+if __name__ == "__main__":
+    unittest.main()
