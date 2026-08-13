@@ -1,6 +1,7 @@
 import sys
+import time
 sys.path.append("..")
-from tang_control.tang_control.config import Pin, Control 
+from tang_control.config import Control, JoyParam, Pin
 import spidev
 
 try: 
@@ -16,11 +17,10 @@ def read_analog_pin(channel):
     return data
 
 def manual_control():
-    # Read the joystick position data
-    vrx_pos = read_analog_pin(Pin.vrx_channel) / Control.max_joystick_val * 2 - 1  # normalize to [-1, 1]
-    vry_pos = read_analog_pin(Pin.vry_channel) / Control.max_joystick_val * 2 - 1  
-    # Debugging
-    print(f"Normalized X : {vrx_pos}, Normalized Y : {vry_pos}")
+    # Read all MCP3004 channels so wiring/channel assignments can be checked.
+    raw = [read_analog_pin(channel) for channel in range(4)]
+    vrx_pos = raw[Pin.vrx_channel] / JoyParam.max_joystick_val * 2 - 1
+    vry_pos = raw[Pin.vry_channel] / JoyParam.max_joystick_val * 2 - 1
     # Calculate linear and angular velocity
     linear_velocity = Control.max_target_v * max(vry_pos, 0)  # vry_pos negative would mean backward, but we restrict that
     angular_velocity = vrx_pos * Control.max_target_w
@@ -29,8 +29,14 @@ def manual_control():
         linear_velocity = 0
     if abs(angular_velocity) < Control.velocity_thresh:
         angular_velocity = 0
-    print(f"linear_velocity{linear_velocity}, angular_velocity{angular_velocity}")
+    print(
+        f"CH0={raw[0]:4d} CH1={raw[1]:4d} "
+        f"CH2={raw[2]:4d} CH3={raw[3]:4d} | "
+        f"X={vrx_pos:+.3f} Y={vry_pos:+.3f} | "
+        f"v={linear_velocity:+.3f} w={angular_velocity:+.3f}"
+    )
     return
 
 while(True):
     manual_control()
+    time.sleep(0.2)
