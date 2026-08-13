@@ -30,8 +30,14 @@ class Pin:
     encoder_l_A  = 5
     encoder_l_B  = 6
 
-    manual_mode  = 16
-    follow_mode  = 21
+    follow_mode  = 16
+    manual_mode  = 21
+    mode_led = 14
+
+    low_speed_button = 3
+    high_speed_button = 4
+    low_speed_led = 25
+    high_speed_led = 26
 
     vrx_channel  = 0
     vry_channel  = 1
@@ -47,7 +53,7 @@ class Pin:
     emergency_button = 5
     unlock_emergency_button = 4
     followme_start_button = 7
-    followme_stop_button = 8
+    followme_stop_button = 6
     teleop_start_button = [0, 1, 2, 3]
     speed_mode_button = [9,10]
 
@@ -87,11 +93,31 @@ class Fig:
     target_a_data = []
 
 class Control:
-    # 最大速度
+    # ------------------------------------------------------------------
+    # 現行制御：CuGoV4 RS-485用
+    # TangControllerとcontroller_core.pyから参照する。
+    # ------------------------------------------------------------------
+    manual_low_max_v_mps = 0.15
+    manual_low_max_w_radps = 0.6
+    manual_high_max_v_mps = 0.30
+    manual_high_max_w_radps = 1.0
+
+    wheel_radius_left = 0.03858
+    wheel_radius_right = 0.03858
+    tread = 0.376
+    reduction_ratio = 20.0
+    rs485_max_motor_rpm = 2600.0
+    rs485_min_motor_rpm = 80.0
+    anti_creep_start_rpm = 120.0
+
+    # ------------------------------------------------------------------
+    # 旧制御：GPIO PWM・旧teleop互換用
+    # tang_control/motor.py、tang_teleop/tang_joy.pyなどが参照する。
+    # 現行のTangControllerでは使用しない。
+    # ------------------------------------------------------------------
     max_target_v = 0.3
     max_target_w = 1.0
     velocity_thresh = 1e-2
-    # CuGoV4用
     max_motor_rpm = 4000
     # 入力電圧
     input_v = 26.1

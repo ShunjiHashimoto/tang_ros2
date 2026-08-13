@@ -1,223 +1,316 @@
-## モード切り替え機能
-# joystickモジュールからモードの切り替え信号を受け取る
-# 緊急停止のスイッチが押されれば、緊急停止モードに移行する
-# 信号に応じて、下記のモードを切り替える 
+#!/usr/bin/env python3
+"""TANGのGPIO、ジョイスティック、CuGoV4用RS-485指令をまとめる制御ノード。"""
 
-## 追跡モード
-# leg_tracker_ros2から送られた人物の位置をもとに、追跡対象者の中心位置を計算する
-# 追跡対象者の位置に応じて目標角速度、速度を計算する
-# それらをPWMに変換して、モータに指令する
-
-## 手動モード
-# joystickの現在の操作量を取得する
-# 操作量に応じて目標角速度、速度を計算する
-# それらをPWMに変換して、モータに指令する
-
-## 緊急停止モード
-# モータの制御を停止する
-
-import rclpy
-from rclpy.node import Node
-from rclpy.logging import get_logger
 import time
 
-from sensor_msgs.msg import LaserScan, Joy
-from geometry_msgs.msg import Twist
-from tang_control.config import Pin, PWM, FOLLOWPID, HumanFollowParam, Control, LiDARParam, JoyParam
-from tang_control.motor import Motor
-from gpiozero import Button, LED 
+import rclpy
 import spidev
-import math
+from geometry_msgs.msg import Twist
+from gpiozero import Button, LED
+from rclpy.node import Node
+from sensor_msgs.msg import Joy, LaserScan
+from std_msgs.msg import String
 
-try: 
-    spi = spidev.SpiDev()
-    spi.open(0,0)
-    spi.max_speed_hz = 100000 
-except:
-    print("error: failed to open spi")
-    
+from cugo_rs485_motor_control.bridge import (
+    MotorBridgeConfig,
+    Rs485DualMotorBridge,
+)
+from tang_control.config import Control, LiDARParam, Pin
+from tang_control.controller_core import (
+    FOLLOW,
+    MANUAL,
+    TangControlState,
+    TangControlRuntime,
+)
+
+
+# 実機と非常停止ボタンを準備できるまでは、必ずdry-runで使用する。
+# Falseにすると実際にRS-485指令が送信されるため、現段階では変更しない。
+MOTOR_DRY_RUN = True
+CONTROL_PERIOD_SEC = 0.05
+PRINT_PERIOD_SEC = 0.20
+
+
 class TangController(Node):
     def __init__(self):
-        super().__init__('tang_control')
-        self.logger = get_logger('tang_control_logger')
-        self.logger.info('TangController initialized')
-        self.button_follow = Button(Pin.follow_mode)
-        self.button_follow.when_pressed = self.switch_on_callback_follow
-        self.button_manual = Button(Pin.manual_mode)
-        self.button_manual.when_pressed = self.switch_on_callback_manual
-        self.motor = Motor()
-        self.red_led = LED(Pin.red_led) 
-        self.green_led = LED(Pin.green_led)
-        self.green_led.on()
-        self.mode = "manual"
-        self.prev_mode = None
-        self.speed_mode = "low"
-        self.obstacle_near = False
-        self.press_start_time = None  # 押し込み開始時刻
-        self.button_pressed_last = False  # 前回の押し状態
-        self.flag_teleop_speed_mode = False
-        self.last_cmd_vel_time = time.time() 
+        super().__init__("tang_control")
 
-        # LiDARデータのサブスクライブ
-        self.lidar_subscription = self.create_subscription(LaserScan,'/scan',self.lidar_callback,10)
-        self.cmd_vel_subscription = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
-        # joyトピック 
-        self.joy_pub = self.create_publisher(Joy, '/joy', 10)
-        self.joy_subscriber = self.create_subscription(Joy,'/joy', self.joy_callback, 10)
-        
-        self.buzzer = LED(Pin.buzzer)
-        self.mode = "manual"
+        # 起動直後はIDLEとし、ボタンを押すまでモーター指令を出さない。
+        self.state = TangControlState()
+        # GPIOのコールバックでは状態を直接変更せず、メインループへ要求を渡す。
+        # これにより、モード変更と停止指令が別スレッドで競合するのを防ぐ。
+        self.requested_mode = None
         self.obstacle_near = False
-        
-    # Publish and Subscribe 
+        self.closed = False
+        self.next_manual_log = 0.0
+        self.last_cmd_vel = Twist()
+        self.last_cmd_vel_time = 0.0
+
+        self.spi = spidev.SpiDev()
+        self.spi.open(0, 0)
+        self.spi.max_speed_hz = 100000
+
+        # モード切替ボタンはプルアップ入力なので、押下時のGPIOレベルはLOW。
+        self.follow_button = Button(
+            Pin.follow_mode,
+            pull_up=True,
+            bounce_time=0.05,
+        )
+        self.manual_button = Button(
+            Pin.manual_mode,
+            pull_up=True,
+            bounce_time=0.05,
+        )
+        # 速度切替も独立したモーメンタリボタンを使用する。
+        # GPIO3=低速、GPIO4=高速。ボタンを離しても選択速度は保持する。
+        self.low_speed_button = Button(
+            Pin.low_speed_button,
+            pull_up=True,
+            bounce_time=0.05,
+        )
+        self.high_speed_button = Button(
+            Pin.high_speed_button,
+            pull_up=True,
+            bounce_time=0.05,
+        )
+        # GPIO14はモード表示、GPIO25/26は低速・高速表示に使用する。
+        self.mode_led = LED(Pin.mode_led, initial_value=False)
+        self.low_speed_led = LED(Pin.low_speed_led, initial_value=False)
+        self.high_speed_led = LED(Pin.high_speed_led, initial_value=False)
+
+        self.follow_button.when_pressed = lambda: self.request_mode(FOLLOW)
+        self.manual_button.when_pressed = lambda: self.request_mode(MANUAL)
+
+        # 実機動作済みのCuGoV4設定を変更せず使用する。
+        # 左モーターは符号反転、右モーターは通常方向として扱う。
+        self.bridge = Rs485DualMotorBridge(
+            port="/dev/ttyUSB0",
+            baudrate=9600,
+            timeout=0.3,
+            left_slave=2,
+            right_slave=1,
+            config=MotorBridgeConfig(
+                op_no=2,
+                wheel_radius_left=Control.wheel_radius_left,
+                wheel_radius_right=Control.wheel_radius_right,
+                tread=Control.tread,
+                reduction_ratio=Control.reduction_ratio,
+                max_rpm=Control.rs485_max_motor_rpm,
+                min_rpm=Control.rs485_min_motor_rpm,
+                anti_creep_start_rpm=Control.anti_creep_start_rpm,
+                left_motor_sign=-1,
+                right_motor_sign=1,
+                deceleration_stop=True,
+            ),
+            dry_run=MOTOR_DRY_RUN,
+        )
+        self.runtime = TangControlRuntime(self.bridge, self.state)
+
+        # LiDARは従来どおり近接停止に使用する。
+        self.lidar_subscription = self.create_subscription(
+            LaserScan,
+            "/scan",
+            self.lidar_callback,
+            10,
+        )
+        self.cmd_vel_subscription = self.create_subscription(
+            Twist,
+            "/cmd_vel",
+            self.cmd_vel_callback,
+            10,
+        )
+        # FOLLOW開始・停止用の仮想Joyと、確認用の現在モードを発行する。
+        self.joy_publisher = self.create_publisher(Joy, "/joy", 10)
+        self.mode_publisher = self.create_publisher(String, "/tang/mode", 10)
+
+        self.update_indicators()
+        self.publish_mode()
+        self.get_logger().info(
+            "TangController ready: IDLE, RS-485 dry-run enabled"
+        )
+
+    def request_mode(self, mode):
+        """GPIOで選択されたモードを、次の制御周期で処理するため保存する。"""
+        self.requested_mode = mode
+
+    def apply_requested_mode(self):
+        """停止指令を先に生成してから、安全にモードを切り替える。"""
+        selected = self.requested_mode
+        self.requested_mode = None
+        if selected is None or selected == self.state.mode:
+            return False
+
+        previous = self.state.mode
+        # 入力元を変更する前に、左右モーターを必ず停止させる。
+        self.runtime.select_mode(selected)
+        if previous == FOLLOW:
+            # FOLLOWを離れる場合は追従ノードにも停止ボタンを送る。
+            self.publish_fake_joy_button_press(Pin.followme_stop_button)
+
+        if selected == FOLLOW:
+            # 非常停止解除と追従開始は、既存icartと同じJoyボタン番号を使う。
+            self.publish_fake_joy_button_press(Pin.unlock_emergency_button)
+            self.publish_fake_joy_button_press(Pin.followme_start_button)
+
+        self.update_indicators()
+        self.publish_mode()
+        self.get_logger().info(f"Mode: {previous.upper()} -> {selected.upper()}")
+        return True
+
     def lidar_callback(self, msg):
-        # LiDARの点群データをチェック
-        self.obstacle_near = any(r < LiDARParam.stop_distance_thresh for r in msg.ranges)
-    
-    def joy_callback(self, msg):
-        if any(msg.buttons[i] == 1 for i in Pin.teleop_start_button):
-            self.mode = "teleop"
-        self.flag_teleop_speed_mode = True if any(msg.buttons[i] == 1 for i in Pin.speed_mode_button) else False
-        # print(f"teleop_start_button: {msg.buttons[Pin.teleop_start_button[0]]}, speed_mode_button: {msg.buttons[Pin.speed_mode_button[0]]}", flush=True)
-    
-    def normalize_joystick_input(self, value, max_value=PWM.max_duty, prev_value=0):
-        # ジョイスティック入力を正規化
-        normalized_value = value * max_value if max_value > 0 else value
-        # 平滑化された値を計算
-        smoothed_value = JoyParam.ema_alpha * normalized_value + (1 - JoyParam.ema_alpha) * prev_value if max_value >0 else value
-        return smoothed_value
+        """停止距離より近い有効な測距値があるかを記憶する。"""
+        self.obstacle_near = any(
+            0.0 < distance < LiDARParam.stop_distance_thresh
+            for distance in msg.ranges
+        )
 
-    def cmd_vel_callback(self, cmd_vel):
-        self.last_cmd_vel_time = time.time() 
-        # cmd_velの値を正規化
-        normarized_linear_x = self.normalize_joystick_input(cmd_vel.linear.x, max_value=-1, prev_value=self.motor.prev_normalized_linear_x)
-        normarized_angular_z = self.normalize_joystick_input(cmd_vel.angular.z, max_value=-1, prev_value=self.motor.prev_normalized_angular_z)
-        self.motor.update_prev_value_vw(normarized_linear_x, normarized_angular_z)
-        # 目標回転数を計算
-        motor_rpm_l, motor_rpm_r = self.motor.convert_cmdvel_to_rpm(normarized_linear_x, normarized_angular_z, self.mode)
-        # デューティ比に変換
-        duty_l, duty_r = self.motor.convert_rpm_to_duty(motor_rpm_l, motor_rpm_r, self.switch_max_duty())
-        print(f"Received cmd_vel: linear.x={cmd_vel.linear.x:.2f}, angular.z={cmd_vel.angular.z:.2f}", flush=True)
-        print(f"duty_l : {duty_l:.2f}, duty_r : {duty_r:.2f}", flush=True)
-        # モータに指令
-        self.motor.run(duty_r, duty_l)
-    
+    def cmd_vel_callback(self, msg):
+        """FOLLOW統合に備えて最新の速度指令と受信時刻だけを保存する。"""
+        # 現段階では、受信コールバックからモーターを直接動かさない。
+        # FOLLOWのモーター経路は次の統合作業で接続する。
+        self.last_cmd_vel = msg
+        self.last_cmd_vel_time = time.monotonic()
+
     def publish_fake_joy_button_press(self, button_index):
+        """追従ノードへ、指定したボタンだけが押されたJoyを1回送る。"""
         msg = Joy()
-        msg.axes = [0.0] * 8 
+        msg.axes = [0.0] * 8
         msg.buttons = [0] * 12
         msg.buttons[button_index] = 1
-        self.joy_pub.publish(msg)
-    
-    # 走行モード切替 
-    def switch_on_callback_follow(self):
-        self.logger.info("追従モード")
-        self.buzzer.on()
-        self.mode = "follow"
-        self.publish_fake_joy_button_press(Pin.unlock_emergency_button) 
-        self.publish_fake_joy_button_press(Pin.followme_start_button) 
+        self.joy_publisher.publish(msg)
 
-    def switch_on_callback_manual(self):
-        self.logger.info("手動操作")
-        self.buzzer.on()
-        self.mode = "manual"
-        self.publish_fake_joy_button_press(Pin.emergency_button) 
-        self.publish_fake_joy_button_press(Pin.followme_stop_button) 
-    
-    # スピードモードの切替
-    def toggle_speed_mode(self):
-        if self.speed_mode == "low":
-            self.speed_mode = "high"
-            self.red_led.on()
-            self.green_led.off()
-        elif self.speed_mode == "high":
-            self.speed_mode = "low"
-            self.green_led.on()
-            self.red_led.off()
+    def publish_mode(self):
+        """現在モードを/tang/modeへ発行する。"""
+        msg = String()
+        msg.data = self.state.mode
+        self.mode_publisher.publish(msg)
 
-    def handle_speed_mode_toggle(self, button_pressed):
-        if button_pressed:
-            if not self.button_pressed_last:
-                # 新しく押し込みが始まったとき
-                self.press_start_time = time.time()
-            if self.press_start_time and (time.time() - self.press_start_time >= 1.0):
-                # 2秒押し続けたらモード切替
-                self.toggle_speed_mode()
-                # 切り替えたのでリセット
-                self.press_start_time = None
+    def read_adc(self, channel):
+        """MCP3004の指定チャンネルから10bitのADC値を読み取る。"""
+        response = self.spi.xfer2([1, (8 + channel) << 4, 0])
+        return ((response[1] & 3) << 8) | response[2]
+
+    def update_speed_mode(self):
+        """MANUAL中の新しい速度ボタン押下だけを反映する。"""
+        changed = self.state.update_speed_buttons(
+            self.low_speed_button.is_pressed,
+            self.high_speed_button.is_pressed,
+        )
+        if changed:
+            self.update_indicators()
+            self.get_logger().info(
+                f"Speed: {self.state.speed_mode.upper()}"
+            )
+
+    def update_indicators(self):
+        """現在のモードと速度設定を3つのLEDへ反映する。"""
+        # FOLLOWはGPIO14を点灯し、IDLEとMANUALでは消灯する。
+        if self.state.mode == FOLLOW:
+            self.mode_led.on()
         else:
-            # 押してないならタイマーリセット
-            self.press_start_time = None
-        self.button_pressed_last = button_pressed
+            self.mode_led.off()
 
-    # モードに応じた最大デューティ比を返す
-    def switch_max_duty(self):
-        if self.mode == "follow": return PWM.max_duty_follow
-        max_duty = PWM.max_turbo_duty if self.speed_mode == "high" else PWM.max_duty
-        return max_duty
-    
-    # joystick信号の取得
-    def read_analog_pin(self, channel):
-        adc = spi.xfer2([1, (8 + channel)<<4, 0])
-        data = ((adc[1]&3) << 8) + adc[2]
-        return data
-    
-    # pwmを使った手動操作
-    def manual_pwm_control(self):
-        # xが前後方向、マイナスなら後ろ、プラスなら前
-        # yがプラスなら左モータ、マイナスなら右モータを回す
-        self.buzzer.off()
-        # 前後方向
-        vry_pos = self.read_analog_pin(Pin.vrx_channel) / JoyParam.max_joystick_val*2 - 1  # normalize to [-1, 1]
-        # 左右方向
-        vrx_pos = self.read_analog_pin(Pin.vry_channel) / JoyParam.max_joystick_val*2 - 1   
-        # xyの値を正規化
-        normarized_x = self.normalize_joystick_input(vrx_pos, max_value=self.switch_max_duty(), prev_value=self.motor.prev_normalized_value_x)
-        normarized_y = self.normalize_joystick_input(vry_pos, max_value=self.switch_max_duty(), prev_value=self.motor.prev_normalized_value_y)
-        self.motor.update_prev_value_xy(normarized_x, normarized_y)
-        # duty比に変換
-        duty_r, duty_l = self.motor.convert_joyinput_to_duty(vrx_pos, vry_pos, normarized_x, normarized_y, self.switch_max_duty())
-        self.motor.run(duty_r, duty_l)
-        return
-    
-    def follow_control(self):
-        self.buzzer.off()
-        return
+        # 選択中の速度に対応するLEDだけを点灯する。
+        if self.state.speed_mode == "low":
+            self.low_speed_led.on()
+            self.high_speed_led.off()
+        else:
+            self.low_speed_led.off()
+            self.high_speed_led.on()
 
-    def check_mode_change(self):
-        if self.mode != self.prev_mode: self.motor.reset_settings()
-        self.prev_mode = self.mode
+    def manual_control(self):
+        """ジョイスティックを読み、dry-runの左右モーター指令へ変換する。"""
+        # CH0は操舵、CH1は前後操作として実機確認済み。
+        raw_steering = self.read_adc(Pin.vrx_channel)
+        raw_throttle = self.read_adc(Pin.vry_channel)
+        result = self.runtime.apply_manual_input(
+            raw_steering,
+            raw_throttle,
+        )
+        limited_v, limited_w, left_rpm, right_rpm = result
+
+        now = time.monotonic()
+        # ログ量を抑えつつ、入力値と演算結果を追える周期で表示する。
+        if now >= self.next_manual_log:
+            self.get_logger().info(
+                f"MANUAL {self.state.speed_mode.upper()} "
+                f"CH0={raw_steering} CH1={raw_throttle} "
+                f"v={limited_v:+.3f} w={limited_w:+.3f} "
+                f"left={left_rpm:+.0f}rpm right={right_rpm:+.0f}rpm"
+            )
+            self.next_manual_log = now + PRINT_PERIOD_SEC
+
+    def control_once(self):
+        """1制御周期分のモード、速度、安全停止、手動操作を処理する。"""
+        mode_changed = self.apply_requested_mode()
+        if mode_changed and self.state.mode == MANUAL:
+            # MANUALは必ず低速で開始する。切替時から速度ボタンが押されて
+            # いた場合は採用せず、一度離してからの再押下を要求する。
+            self.state.remember_speed_buttons(
+                self.low_speed_button.is_pressed,
+                self.high_speed_button.is_pressed,
+            )
+        else:
+            self.update_speed_mode()
+
+        if self.obstacle_near:
+            # 障害物を検出した周期では、ジョイスティック入力より停止を優先する。
+            self.bridge.stop()
+            return
+        if self.state.mode == MANUAL:
+            self.manual_control()
+            return
+
+        # IDLEと、モーター経路が未統合のFOLLOWでは常に停止を維持する。
+        self.bridge.stop()
 
     def start(self):
-        while(rclpy.ok()):
-            speed_mode_button_pressed = True if self.read_analog_pin(Pin.swt_channel) == 0 or self.flag_teleop_speed_mode else False
-            self.handle_speed_mode_toggle(speed_mode_button_pressed)
-            self.check_mode_change()
-            if self.mode == "emergency" or self.obstacle_near: 
-                self.motor.stop()
-                self.logger.info("緊急停止")
-                # self.mode = "manual"
-            elif self.mode == "follow":
-                self.follow_control()
-                if time.time() - self.last_cmd_vel_time > 0.5:
-                    self.motor.stop()
-            elif self.mode == "manual":
-                self.manual_pwm_control()
-            elif self.mode == "teleop":
-                if time.time() - self.last_cmd_vel_time > 0.5:
-                    self.motor.stop()
-            else:
-                print("Something wrong, Please check curretn mode")
-            rclpy.spin_once(self, timeout_sec=0.1)
-        print("Shutdown, Motor stopping ...")
-        self.motor.stop()
+        """ROSイベントと車体制御を50ms周期で処理する。"""
+        try:
+            while rclpy.ok():
+                rclpy.spin_once(self, timeout_sec=CONTROL_PERIOD_SEC)
+                self.control_once()
+        finally:
+            self.close_hardware()
 
-def main():
-    rclpy.init()
-    node = TangController()
-    node.start()
-    node.destroy_node()
-    rclpy.shutdown()
-                
-if __name__ == '__main__':
+    def close_hardware(self):
+        """終了時に停止指令を生成し、GPIO、SPI、RS-485資源を解放する。"""
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            self.bridge.close()
+        finally:
+            self.mode_led.off()
+            self.low_speed_led.off()
+            self.high_speed_led.off()
+            self.follow_button.close()
+            self.manual_button.close()
+            self.low_speed_button.close()
+            self.high_speed_button.close()
+            self.mode_led.close()
+            self.low_speed_led.close()
+            self.high_speed_led.close()
+            self.spi.close()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = None
+    try:
+        node = TangController()
+        node.start()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if node is not None:
+            node.close_hardware()
+            node.destroy_node()
+        # SIGINT時はrclpy側ですでにshutdownされている場合があるため、
+        # 未停止の場合だけ明示的に終了する。
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
     main()
