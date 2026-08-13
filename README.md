@@ -12,7 +12,17 @@
 
 ## ビルド
 ```bash
-colcon build --symlink-install --packages-select tang_control
+cd ~/icart_ws
+colcon build --symlink-install --packages-up-to tang_bringup
+source install/setup.bash
+```
+
+## 統合起動
+
+URG、固定TF、脚追従ノード、TANG制御ノードを1つのlaunchで起動します。
+
+```bash
+ros2 launch tang_bringup tang_bringup.launch.py
 ```
 
 ## 🚦 モード切替機能

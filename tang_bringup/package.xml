@@ -11,6 +11,8 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>urg_node2</exec_depend>
   <exec_depend>tang_control</exec_depend>
+  <exec_depend>icart_mini_leg_tracker</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
   
   <export>
     <build_type>ament_python</build_type>
