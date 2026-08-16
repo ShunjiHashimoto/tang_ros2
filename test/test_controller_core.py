@@ -83,17 +83,30 @@ class JoystickConversionTest(unittest.TestCase):
         self.assertEqual((0.0, 0.0), joystick_to_body_velocity(500, 500, LOW))
 
     def test_low_and_high_limits(self):
-        low_v, low_w = joystick_to_body_velocity(70, 960, LOW)
-        high_v, high_w = joystick_to_body_velocity(70, 960, HIGH)
+        # 取付変更後はCH1最小側が前進、CH0最大側が西向き旋回になる。
+        low_v, low_w = joystick_to_body_velocity(960, 50, LOW)
+        high_v, high_w = joystick_to_body_velocity(960, 50, HIGH)
         self.assertAlmostEqual(Control.manual_low_max_v_mps, low_v)
         self.assertAlmostEqual(Control.manual_low_max_w_radps, low_w)
         self.assertAlmostEqual(Control.manual_high_max_v_mps, high_v)
         self.assertAlmostEqual(Control.manual_high_max_w_radps, high_w)
 
+    def test_reverse_input_is_negative_after_mounting_change(self):
+        low_v, _ = joystick_to_body_velocity(500, 960, LOW)
+        high_v, _ = joystick_to_body_velocity(500, 960, HIGH)
+        self.assertAlmostEqual(-Control.manual_low_max_v_mps, low_v)
+        self.assertAlmostEqual(-Control.manual_high_max_v_mps, high_v)
+
+    def test_east_input_is_negative_angular_velocity_after_mounting_change(self):
+        _, low_w = joystick_to_body_velocity(70, 500, LOW)
+        _, high_w = joystick_to_body_velocity(70, 500, HIGH)
+        self.assertAlmostEqual(-Control.manual_low_max_w_radps, low_w)
+        self.assertAlmostEqual(-Control.manual_high_max_w_radps, high_w)
+
     def test_axes_are_clamped(self):
         v, w = joystick_to_body_velocity(2000, -100, HIGH)
-        self.assertAlmostEqual(-Control.manual_high_max_v_mps, v)
-        self.assertAlmostEqual(-Control.manual_high_max_w_radps, w)
+        self.assertAlmostEqual(Control.manual_high_max_v_mps, v)
+        self.assertAlmostEqual(Control.manual_high_max_w_radps, w)
 
 
 class FollowVelocityTest(unittest.TestCase):
@@ -216,7 +229,7 @@ class TangControlRuntimeTest(unittest.TestCase):
             bridge,
             TangControlState(mode=MANUAL, speed_mode=LOW),
         )
-        result = runtime.apply_manual_input(70, 960)
+        result = runtime.apply_manual_input(960, 50)
         self.assertAlmostEqual(Control.command_ema_alpha * Control.manual_low_max_v_mps, result[0])
         self.assertAlmostEqual(Control.command_ema_alpha * Control.manual_low_max_w_radps, result[1])
         self.assertEqual("velocity", bridge.calls[0][0])

@@ -30,6 +30,8 @@ STEERING_MAX = 960
 THROTTLE_MIN = 50
 THROTTLE_CENTER = 500
 THROTTLE_MAX = 960
+THROTTLE_SIGN = -1.0
+STEERING_SIGN = 1.0
 ADC_DEADBAND = 35
 
 STEERING_CHANNEL = 0
@@ -144,16 +146,18 @@ def main() -> int:
                 STEERING_CENTER,
                 STEERING_MAX,
             )
-            throttle = normalize_axis(
+            # The joystick is mounted front-to-back in the reversed direction.
+            # Apply the sign here so robot-forward is positive ROS linear.x.
+            throttle = THROTTLE_SIGN * normalize_axis(
                 raw_throttle,
                 THROTTLE_MIN,
                 THROTTLE_CENTER,
                 THROTTLE_MAX,
             )
 
-            # The ADC value increases to the right, while ROS positive angular
-            # velocity is counter-clockwise (left), hence the sign inversion.
-            steering = -raw_x
+            # After the mounting change, CH0 increases toward robot-left
+            # (west). ROS positive angular velocity is also left/counter-clockwise.
+            steering = STEERING_SIGN * raw_x
             if speed_mode == "LOW":
                 max_v = LOW_MAX_V_MPS
                 max_w = LOW_MAX_W_RADPS

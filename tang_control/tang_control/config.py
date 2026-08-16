@@ -101,6 +101,11 @@ class Control:
     manual_low_max_w_radps = 0.6
     manual_high_max_v_mps = 0.30
     manual_high_max_w_radps = 1.0
+    # ジョイスティックを前後反転して取り付けたため、CH1の符号を反転する。
+    # ロボット前進をROSの正方向、後退を負方向に合わせる。
+    manual_throttle_sign = -1.0
+    # 同じ取付変更でCH0も反転したため、西側への操作をROSの正角速度にする。
+    manual_steering_sign = 1.0
     follow_max_v_mps = 0.15
     follow_max_w_radps = math.pi / 3.0
     follow_angular_sign = -1.0

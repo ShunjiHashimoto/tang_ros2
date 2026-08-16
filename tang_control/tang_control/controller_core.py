@@ -56,8 +56,11 @@ def joystick_to_body_velocity(raw_steering, raw_throttle, speed_mode):
         max_v = Control.manual_low_max_v_mps
         max_w = Control.manual_low_max_w_radps
 
-    # 操舵ADCは右へ倒すと増加するが、ROSの正の角速度は左旋回なので反転する。
-    return throttle_axis * max_v, -steering_axis * max_w
+    # 取付方向を設定値で補正し、前進をROSの正方向、西側への旋回を正角速度にする。
+    return (
+        throttle_axis * Control.manual_throttle_sign * max_v,
+        steering_axis * Control.manual_steering_sign * max_w,
+    )
 
 
 def limit_follow_velocity(v_mps, w_radps):
