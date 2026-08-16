@@ -25,6 +25,13 @@ URG、固定TF、脚追従ノード、TANG制御ノードを1つのlaunchで起�
 ros2 launch tang_bringup tang_bringup.launch.py
 ```
 
+既定ではRS-485出力を行わないdry-runです。クローラを浮かせ、非常停止を
+使用できる状態で実機出力を明示的に有効化する場合は次を使用します。
+
+```bash
+ros2 launch tang_bringup tang_bringup.launch.py motor_dry_run:=false
+```
+
 ## 🚦 モード切替機能
 
 本ノードでは、以下の3種類のモードを切り替えてロボットを制御します。

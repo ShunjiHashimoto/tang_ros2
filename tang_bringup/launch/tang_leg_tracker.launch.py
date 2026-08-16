@@ -42,6 +42,13 @@ def generate_launch_description():
         package="icart_mini_leg_tracker",
         executable="leg_cluster_tracking_node",
         name="leg_cluster_tracking_node",
+        parameters=[
+            PathJoinSubstitution([
+                FindPackageShare("icart_mini_leg_tracker"),
+                "config",
+                "leg_cluster_tracking_params.yaml",
+            ])
+        ],
         output="screen",
     )
 

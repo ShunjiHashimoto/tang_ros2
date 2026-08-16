@@ -1,12 +1,15 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
-from launch.substitutions import PathJoinSubstitution
 
 
 def generate_launch_description():
+    motor_dry_run = LaunchConfiguration("motor_dry_run")
+
     # URG、TF、脚追従ノードは追従用launchにまとめる。
     leg_tracker_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -23,10 +26,18 @@ def generate_launch_description():
         package="tang_control",
         executable="tang_control",
         name="tang_control",
+        parameters=[{
+            "motor_dry_run": ParameterValue(motor_dry_run, value_type=bool),
+        }],
         output="screen",
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            "motor_dry_run",
+            default_value="true",
+            description="Keep RS-485 motor output disabled when true.",
+        ),
         leg_tracker_launch,
         tang_control_node,
     ])
