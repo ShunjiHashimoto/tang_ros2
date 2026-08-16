@@ -24,11 +24,9 @@ from tang_control.controller_core import (
 )
 
 
-# 実機と非常停止ボタンを準備できるまでは、必ずdry-runで使用する。
-# Falseにすると実際にRS-485指令が送信されるため、現段階では変更しない。
-MOTOR_DRY_RUN = True
 CONTROL_PERIOD_SEC = 0.05
 PRINT_PERIOD_SEC = 0.20
+MODE_BEEP_DURATION_SEC = 0.20
 
 
 class TangController(Node):
@@ -43,8 +41,16 @@ class TangController(Node):
         self.obstacle_near = False
         self.closed = False
         self.next_manual_log = 0.0
+        self.next_follow_log = 0.0
         self.last_cmd_vel = Twist()
         self.last_cmd_vel_time = 0.0
+        self.last_follow_control_time = 0.0
+        self.buzzer_off_at = 0.0
+
+        # 安全のため既定はdry-runとし、launch引数で明示した場合だけ
+        # 実機出力する。
+        self.declare_parameter("motor_dry_run", True)
+        motor_dry_run = bool(self.get_parameter("motor_dry_run").value)
 
         self.spi = spidev.SpiDev()
         self.spi.open(0, 0)
@@ -77,6 +83,7 @@ class TangController(Node):
         self.mode_led = LED(Pin.mode_led, initial_value=False)
         self.low_speed_led = LED(Pin.low_speed_led, initial_value=False)
         self.high_speed_led = LED(Pin.high_speed_led, initial_value=False)
+        self.buzzer = LED(Pin.buzzer, initial_value=False)
 
         self.follow_button.when_pressed = lambda: self.request_mode(FOLLOW)
         self.manual_button.when_pressed = lambda: self.request_mode(MANUAL)
@@ -102,7 +109,7 @@ class TangController(Node):
                 right_motor_sign=1,
                 deceleration_stop=True,
             ),
-            dry_run=MOTOR_DRY_RUN,
+            dry_run=motor_dry_run,
         )
         self.runtime = TangControlRuntime(self.bridge, self.state)
 
@@ -125,8 +132,9 @@ class TangController(Node):
 
         self.update_indicators()
         self.publish_mode()
+        dry_run_state = "enabled" if motor_dry_run else "disabled"
         self.get_logger().info(
-            "TangController ready: IDLE, RS-485 dry-run enabled"
+            f"TangController ready: IDLE, RS-485 dry-run={dry_run_state}"
         )
 
     def request_mode(self, mode):
@@ -148,14 +156,29 @@ class TangController(Node):
             self.publish_fake_joy_button_press(Pin.followme_stop_button)
 
         if selected == FOLLOW:
+            # モード切替前に受信した古い速度指令は使用しない。
+            self.last_cmd_vel_time = 0.0
+            self.last_follow_control_time = 0.0
             # 非常停止解除と追従開始は、既存icartと同じJoyボタン番号を使う。
             self.publish_fake_joy_button_press(Pin.unlock_emergency_button)
             self.publish_fake_joy_button_press(Pin.followme_start_button)
 
         self.update_indicators()
         self.publish_mode()
+        self.start_mode_beep()
         self.get_logger().info(f"Mode: {previous.upper()} -> {selected.upper()}")
         return True
+
+    def start_mode_beep(self):
+        """モード切替を短いブザー音で通知する。"""
+        self.buzzer.on()
+        self.buzzer_off_at = time.monotonic() + MODE_BEEP_DURATION_SEC
+
+    def update_buzzer(self):
+        """ブザー時間が満了したら、制御ループを止めずに消音する。"""
+        if self.buzzer_off_at > 0.0 and time.monotonic() >= self.buzzer_off_at:
+            self.buzzer.off()
+            self.buzzer_off_at = 0.0
 
     def lidar_callback(self, msg):
         """停止距離より近い有効な測距値があるかを記憶する。"""
@@ -165,9 +188,9 @@ class TangController(Node):
         )
 
     def cmd_vel_callback(self, msg):
-        """FOLLOW統合に備えて最新の速度指令と受信時刻だけを保存する。"""
-        # 現段階では、受信コールバックからモーターを直接動かさない。
-        # FOLLOWのモーター経路は次の統合作業で接続する。
+        """FOLLOW中だけ最新の速度指令と受信時刻を保存する。"""
+        if self.state.mode != FOLLOW:
+            return
         self.last_cmd_vel = msg
         self.last_cmd_vel_time = time.monotonic()
 
@@ -235,13 +258,49 @@ class TangController(Node):
             self.get_logger().info(
                 f"MANUAL {self.state.speed_mode.upper()} "
                 f"CH0={raw_steering} CH1={raw_throttle} "
-                f"v={limited_v:+.3f} w={limited_w:+.3f} "
+                f"v={limited_v * 3.6:+.2f}km/h w={limited_w:+.3f}rad/s "
                 f"left={left_rpm:+.0f}rpm right={right_rpm:+.0f}rpm"
             )
             self.next_manual_log = now + PRINT_PERIOD_SEC
 
+    def follow_control(self):
+        """FOLLOWの最新指令を、タイムアウト付きでモーターへ渡す。"""
+        now = time.monotonic()
+        if (
+            self.last_cmd_vel_time <= 0.0
+            or now - self.last_cmd_vel_time > Control.follow_cmd_timeout_sec
+        ):
+            self.bridge.stop()
+            self.runtime.reset_motion_filters()
+            self.last_follow_control_time = 0.0
+            return
+
+        if self.last_follow_control_time <= 0.0:
+            dt_sec = CONTROL_PERIOD_SEC
+        else:
+            dt_sec = max(
+                0.0,
+                min(CONTROL_PERIOD_SEC, now - self.last_follow_control_time),
+            )
+        self.last_follow_control_time = now
+
+        result = self.runtime.apply_follow_input(
+            self.last_cmd_vel.linear.x,
+            self.last_cmd_vel.angular.z,
+            dt_sec,
+        )
+        limited_v, limited_w, left_rpm, right_rpm = result
+        if now >= self.next_follow_log:
+            self.get_logger().info(
+                f"FOLLOW v={limited_v * 3.6:+.2f}km/h "
+                f"w={limited_w:+.3f}rad/s "
+                f"left={left_rpm:+.0f}rpm right={right_rpm:+.0f}rpm"
+            )
+            self.next_follow_log = now + PRINT_PERIOD_SEC
+
     def control_once(self):
         """1制御周期分のモード、速度、安全停止、手動操作を処理する。"""
+        self.update_buzzer()
         mode_changed = self.apply_requested_mode()
         if mode_changed and self.state.mode == MANUAL:
             # MANUALは必ず低速で開始する。切替時から速度ボタンが押されて
@@ -256,13 +315,20 @@ class TangController(Node):
         if self.obstacle_near:
             # 障害物を検出した周期では、ジョイスティック入力より停止を優先する。
             self.bridge.stop()
+            self.runtime.reset_motion_filters()
+            self.last_follow_control_time = 0.0
             return
         if self.state.mode == MANUAL:
             self.manual_control()
             return
+        if self.state.mode == FOLLOW:
+            self.follow_control()
+            return
 
-        # IDLEと、モーター経路が未統合のFOLLOWでは常に停止を維持する。
+        # IDLEでは常に停止を維持する。
         self.bridge.stop()
+        self.runtime.reset_motion_filters()
+        self.last_follow_control_time = 0.0
 
     def start(self):
         """ROSイベントと車体制御を50ms周期で処理する。"""
@@ -284,6 +350,7 @@ class TangController(Node):
             self.mode_led.off()
             self.low_speed_led.off()
             self.high_speed_led.off()
+            self.buzzer.off()
             self.follow_button.close()
             self.manual_button.close()
             self.low_speed_button.close()
@@ -291,6 +358,7 @@ class TangController(Node):
             self.mode_led.close()
             self.low_speed_led.close()
             self.high_speed_led.close()
+            self.buzzer.close()
             self.spi.close()
 
 

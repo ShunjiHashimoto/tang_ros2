@@ -17,7 +17,10 @@ from tang_control.controller_core import (
     TangControlState,
     TangControlRuntime,
     joystick_to_body_velocity,
+    limit_follow_velocity,
+    limit_follow_acceleration,
     normalize_axis,
+    smooth_command,
 )
 
 
@@ -91,6 +94,34 @@ class JoystickConversionTest(unittest.TestCase):
         v, w = joystick_to_body_velocity(2000, -100, HIGH)
         self.assertAlmostEqual(-Control.manual_high_max_v_mps, v)
         self.assertAlmostEqual(-Control.manual_high_max_w_radps, w)
+
+
+class FollowVelocityTest(unittest.TestCase):
+    def test_command_ema_matches_legacy_tang_smoothing(self):
+        self.assertAlmostEqual(0.1, smooth_command(1.0, 0.0))
+        self.assertAlmostEqual(0.19, smooth_command(1.0, 0.1))
+
+    def test_follow_velocity_is_clamped_in_both_directions(self):
+        self.assertEqual(
+            (Control.follow_max_v_mps, -Control.follow_max_w_radps),
+            limit_follow_velocity(10.0, 10.0),
+        )
+        self.assertEqual(
+            (-Control.follow_max_v_mps, Control.follow_max_w_radps),
+            limit_follow_velocity(-10.0, -10.0),
+        )
+
+    def test_non_finite_follow_velocity_becomes_stop(self):
+        self.assertEqual((0.0, 0.0), limit_follow_velocity(float("nan"), 0.1))
+        self.assertEqual((0.0, 0.0), limit_follow_velocity(0.1, float("inf")))
+
+    def test_follow_acceleration_is_limited_but_deceleration_is_immediate(self):
+        self.assertAlmostEqual(
+            0.005,
+            limit_follow_acceleration(0.15, 0.0, 0.1),
+        )
+        self.assertEqual(0.0, limit_follow_acceleration(0.0, 0.15, 0.1))
+        self.assertEqual(0.0, limit_follow_acceleration(-0.15, 0.10, 0.1))
 
 
 class ProvenBridgeIntegrationTest(unittest.TestCase):
@@ -186,9 +217,53 @@ class TangControlRuntimeTest(unittest.TestCase):
             TangControlState(mode=MANUAL, speed_mode=LOW),
         )
         result = runtime.apply_manual_input(70, 960)
-        self.assertAlmostEqual(Control.manual_low_max_v_mps, result[0])
-        self.assertAlmostEqual(Control.manual_low_max_w_radps, result[1])
+        self.assertAlmostEqual(Control.command_ema_alpha * Control.manual_low_max_v_mps, result[0])
+        self.assertAlmostEqual(Control.command_ema_alpha * Control.manual_low_max_w_radps, result[1])
         self.assertEqual("velocity", bridge.calls[0][0])
+
+    def test_follow_applies_limited_cmd_vel(self):
+        bridge = FakeBridge()
+        runtime = TangControlRuntime(
+            bridge,
+            TangControlState(mode=FOLLOW),
+        )
+        result = runtime.apply_follow_input(10.0, -10.0, 0.05)
+        self.assertAlmostEqual(Control.follow_accel_limit_mps2 * 0.05, result[0])
+        self.assertAlmostEqual(Control.command_ema_alpha * Control.follow_max_w_radps, result[1])
+        self.assertEqual("velocity", bridge.calls[0][0])
+
+        result = runtime.apply_follow_input(10.0, -10.0, 0.05)
+        self.assertAlmostEqual(Control.follow_accel_limit_mps2 * 0.10, result[0])
+
+    def test_follow_zero_command_stops_without_ema_delay(self):
+        bridge = FakeBridge()
+        runtime = TangControlRuntime(bridge, TangControlState(mode=FOLLOW))
+        runtime.apply_follow_input(0.15, 0.2, 0.05)
+
+        result = runtime.apply_follow_input(0.0, 0.0, 0.05)
+
+        self.assertEqual((0.0, 0.0), result[:2])
+        self.assertEqual(0.0, runtime.follow_smoothed_v_mps)
+        self.assertEqual(0.0, runtime.follow_smoothed_w_radps)
+
+    def test_follow_translation_zero_is_immediate_while_turning(self):
+        bridge = FakeBridge()
+        runtime = TangControlRuntime(bridge, TangControlState(mode=FOLLOW))
+        runtime.apply_follow_input(0.15, 0.2, 0.05)
+
+        result = runtime.apply_follow_input(0.0, 0.5, 0.05)
+
+        self.assertEqual(0.0, result[0])
+        self.assertLess(result[1], 0.0)
+
+    def test_manual_never_applies_follow_velocity(self):
+        bridge = FakeBridge()
+        runtime = TangControlRuntime(
+            bridge,
+            TangControlState(mode=MANUAL),
+        )
+        self.assertIsNone(runtime.apply_follow_input(0.1, 0.2, 0.05))
+        self.assertEqual([("stop", False)], bridge.calls)
 
 
 if __name__ == "__main__":

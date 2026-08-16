@@ -101,6 +101,12 @@ class Control:
     manual_low_max_w_radps = 0.6
     manual_high_max_v_mps = 0.30
     manual_high_max_w_radps = 1.0
+    follow_max_v_mps = 0.15
+    follow_max_w_radps = math.pi / 3.0
+    follow_angular_sign = -1.0
+    command_ema_alpha = 0.1
+    follow_accel_limit_mps2 = 0.05
+    follow_cmd_timeout_sec = 0.5
 
     wheel_radius_left = 0.03858
     wheel_radius_right = 0.03858
@@ -174,4 +180,4 @@ class LiDARParam:
 class JoyParam:
     # joystickの最大値
     max_joystick_val = 1064.0
-    ema_alpha = 0.1  # EMAの平滑化係数。0に近いほど変化が緩やか
+    ema_alpha = Control.command_ema_alpha  # 旧GPIO PWM経路でも現行制御と同じEMA係数を使う

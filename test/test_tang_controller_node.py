@@ -23,7 +23,9 @@ def install_ros_stubs():
         pass
 
     class Twist:
-        pass
+        def __init__(self):
+            self.linear = types.SimpleNamespace(x=0.0)
+            self.angular = types.SimpleNamespace(z=0.0)
 
     class String:
         def __init__(self):
@@ -46,6 +48,7 @@ def install_ros_stubs():
 install_ros_stubs()
 
 from tang_control.controller_core import FOLLOW, HIGH, LOW, MANUAL
+from tang_control.config import Control
 from tang_control.tang_control import TangController
 
 
@@ -55,6 +58,10 @@ class FakeBridge:
 
     def stop(self, force=False):
         self.events.append(("stop", force))
+
+    def apply_body_velocity(self, v, w):
+        self.events.append(("velocity", v, w))
+        return v, w, -100.0, 100.0
 
     def close(self):
         self.events.append(("close",))
@@ -113,11 +120,17 @@ def make_node(mode=MANUAL, speed_mode=LOW):
     node.runtime = TangControlRuntime(node.bridge, node.state)
     node.requested_mode = None
     node.obstacle_near = False
+    node.last_cmd_vel = sys.modules["geometry_msgs.msg"].Twist()
+    node.last_cmd_vel_time = 0.0
+    node.last_follow_control_time = 0.0
+    node.next_follow_log = 0.0
     node.joy_publisher = FakePublisher("joy", events)
     node.mode_publisher = FakePublisher("mode", events)
     node.mode_led = FakeLed("mode_led", events)
     node.low_speed_led = FakeLed("low_led", events)
     node.high_speed_led = FakeLed("high_led", events)
+    node.buzzer = FakeLed("buzzer", events)
+    node.buzzer_off_at = 0.0
     node.low_speed_button = FakeInput()
     node.high_speed_button = FakeInput()
     node.follow_button = FakeInput()
@@ -142,6 +155,7 @@ class TangControllerOrchestrationTest(unittest.TestCase):
 
     def test_manual_to_follow_stops_and_publishes_follow_buttons(self):
         node, events = make_node(mode=MANUAL)
+        node.last_cmd_vel_time = 123.0
         node.requested_mode = FOLLOW
         self.assertTrue(node.apply_requested_mode())
 
@@ -150,6 +164,17 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         self.assertEqual(1, joy_events[0][1][4])
         self.assertEqual(1, joy_events[1][1][7])
         self.assertIn(("mode_led", "on"), events)
+        self.assertIn(("buzzer", "on"), events)
+        self.assertEqual(0.0, node.last_cmd_vel_time)
+
+    def test_mode_beep_turns_off_after_deadline(self):
+        node, events = make_node(mode=MANUAL)
+        node.buzzer_off_at = 1.0
+
+        node.update_buzzer()
+
+        self.assertIn(("buzzer", "off"), events)
+        self.assertEqual(0.0, node.buzzer_off_at)
 
     def test_reselecting_mode_has_no_side_effect(self):
         node, events = make_node(mode=MANUAL)
@@ -162,6 +187,49 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         node.obstacle_near = True
         node.control_once()
         self.assertIn(("stop", False), events)
+
+    def test_cmd_vel_is_ignored_outside_follow(self):
+        node, _events = make_node(mode=MANUAL)
+        msg = sys.modules["geometry_msgs.msg"].Twist()
+        msg.linear.x = 0.2
+        node.cmd_vel_callback(msg)
+        self.assertEqual(0.0, node.last_cmd_vel_time)
+
+    def test_fresh_follow_cmd_vel_is_applied(self):
+        node, events = make_node(mode=FOLLOW)
+        msg = sys.modules["geometry_msgs.msg"].Twist()
+        msg.linear.x = 10.0
+        msg.angular.z = -10.0
+        node.cmd_vel_callback(msg)
+        node.control_once()
+
+        velocity_event = next(event for event in events if event[0] == "velocity")
+        self.assertAlmostEqual(Control.follow_accel_limit_mps2 * 0.05, velocity_event[1])
+        self.assertAlmostEqual(
+            Control.command_ema_alpha * 3.141592653589793 / 3.0,
+            velocity_event[2],
+        )
+
+    def test_stale_follow_cmd_vel_stops(self):
+        node, events = make_node(mode=FOLLOW)
+        node.last_cmd_vel_time = 1.0
+        node.runtime.follow_v_mps = 0.1
+        node.control_once()
+        self.assertIn(("stop", False), events)
+        self.assertEqual(0.0, node.runtime.follow_v_mps)
+
+    def test_obstacle_stops_fresh_follow_cmd_vel(self):
+        node, events = make_node(mode=FOLLOW)
+        msg = sys.modules["geometry_msgs.msg"].Twist()
+        msg.linear.x = 0.2
+        node.cmd_vel_callback(msg)
+        node.obstacle_near = True
+        node.runtime.follow_v_mps = 0.1
+        node.control_once()
+
+        self.assertIn(("stop", False), events)
+        self.assertFalse(any(event[0] == "velocity" for event in events))
+        self.assertEqual(0.0, node.runtime.follow_v_mps)
 
     def test_manual_transition_ignores_already_held_high_button(self):
         node, _events = make_node(mode=FOLLOW, speed_mode=HIGH)

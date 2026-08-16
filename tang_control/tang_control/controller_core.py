@@ -1,5 +1,6 @@
 """GPIOやROSに依存しない、TangControllerの状態管理と入力変換。"""
 
+import math
 from dataclasses import dataclass
 
 from tang_control.config import Control
@@ -57,6 +58,52 @@ def joystick_to_body_velocity(raw_steering, raw_throttle, speed_mode):
 
     # 操舵ADCは右へ倒すと増加するが、ROSの正の角速度は左旋回なので反転する。
     return throttle_axis * max_v, -steering_axis * max_w
+
+
+def limit_follow_velocity(v_mps, w_radps):
+    """FOLLOW指令をTANG側の最終速度上限に収める。"""
+    if not math.isfinite(v_mps) or not math.isfinite(w_radps):
+        return 0.0, 0.0
+    limited_v = max(
+        -Control.follow_max_v_mps,
+        min(Control.follow_max_v_mps, v_mps),
+    )
+    limited_w = max(
+        -Control.follow_max_w_radps,
+        min(Control.follow_max_w_radps, w_radps),
+    )
+    return limited_v, limited_w * Control.follow_angular_sign
+
+
+def limit_follow_acceleration(target_v_mps, current_v_mps, dt_sec):
+    """FOLLOWの加速だけを制限する。減速は安全のため即時反映する。"""
+    if not all(math.isfinite(value) for value in (target_v_mps, current_v_mps, dt_sec)):
+        return 0.0
+    if dt_sec <= 0.0 or target_v_mps == current_v_mps:
+        return current_v_mps
+
+    # 減速は即時反映し、進行方向の反転時はいったん停止してから再加速する。
+    same_direction = target_v_mps * current_v_mps >= 0.0
+    if not same_direction:
+        return 0.0
+    if abs(target_v_mps) <= abs(current_v_mps):
+        return target_v_mps
+
+    max_step = Control.follow_accel_limit_mps2 * dt_sec
+    if max_step <= 0.0:
+        return target_v_mps
+    step = math.copysign(min(max_step, abs(target_v_mps - current_v_mps)), target_v_mps)
+    return current_v_mps + step
+
+
+def smooth_command(target, previous):
+    """従来TANGと同じEMAで速度指令を平滑化する。"""
+    if not math.isfinite(target) or not math.isfinite(previous):
+        return 0.0
+    alpha = Control.command_ema_alpha
+    if not 0.0 < alpha <= 1.0:
+        return target
+    return alpha * target + (1.0 - alpha) * previous
 
 
 @dataclass
@@ -117,12 +164,28 @@ class TangControlRuntime:
     def __init__(self, bridge, state=None):
         self.bridge = bridge
         self.state = state if state is not None else TangControlState()
+        self.manual_v_mps = 0.0
+        self.manual_w_radps = 0.0
+        self.follow_smoothed_v_mps = 0.0
+        self.follow_smoothed_w_radps = 0.0
+        self.follow_v_mps = 0.0
+
+    def reset_follow_ramp(self):
+        self.follow_smoothed_v_mps = 0.0
+        self.follow_smoothed_w_radps = 0.0
+        self.follow_v_mps = 0.0
+
+    def reset_motion_filters(self):
+        self.manual_v_mps = 0.0
+        self.manual_w_radps = 0.0
+        self.reset_follow_ramp()
 
     def select_mode(self, selected_mode):
         if selected_mode == self.state.mode:
             return False
         # 指令元のモードを変更する前に、必ず左右の停止を指令する。
         self.bridge.stop(force=True)
+        self.reset_motion_filters()
         return self.state.select_mode(selected_mode)
 
     def apply_manual_input(self, raw_steering, raw_throttle):
@@ -135,4 +198,42 @@ class TangControlRuntime:
             raw_throttle,
             self.state.speed_mode,
         )
-        return self.bridge.apply_body_velocity(requested_v, requested_w)
+        self.manual_v_mps = smooth_command(requested_v, self.manual_v_mps)
+        self.manual_w_radps = smooth_command(requested_w, self.manual_w_radps)
+        return self.bridge.apply_body_velocity(self.manual_v_mps, self.manual_w_radps)
+
+    def apply_follow_input(self, v_mps, w_radps, dt_sec):
+        """FOLLOW時だけ、制限後の速度指令をモーターへ渡す。"""
+        if self.state.mode != FOLLOW:
+            self.bridge.stop()
+            self.reset_follow_ramp()
+            return None
+        limited_v, limited_w = limit_follow_velocity(v_mps, w_radps)
+
+        # 追従対象への到達や旋回優先など、上流から各軸へのゼロ指令は
+        # 平滑化で遅らせず即時反映する。
+        if limited_v == 0.0:
+            self.follow_smoothed_v_mps = 0.0
+            self.follow_v_mps = 0.0
+        else:
+            self.follow_smoothed_v_mps = smooth_command(
+                limited_v,
+                self.follow_smoothed_v_mps,
+            )
+            self.follow_v_mps = limit_follow_acceleration(
+                self.follow_smoothed_v_mps,
+                self.follow_v_mps,
+                dt_sec,
+            )
+
+        if limited_w == 0.0:
+            self.follow_smoothed_w_radps = 0.0
+        else:
+            self.follow_smoothed_w_radps = smooth_command(
+                limited_w,
+                self.follow_smoothed_w_radps,
+            )
+        return self.bridge.apply_body_velocity(
+            self.follow_v_mps,
+            self.follow_smoothed_w_radps,
+        )
