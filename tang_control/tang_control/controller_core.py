@@ -3,7 +3,7 @@
 import math
 from dataclasses import dataclass
 
-from tang_control.config import Control
+from tang_control.config import Control, LiDARParam
 
 
 IDLE = "idle"
@@ -20,6 +20,42 @@ THROTTLE_MIN = 50
 THROTTLE_CENTER = 500
 THROTTLE_MAX = 960
 ADC_DEADBAND = 35
+
+
+def scan_contains_nearby_obstacle(
+    ranges,
+    angle_min,
+    angle_increment,
+    range_min,
+    range_max,
+):
+    """LiDAR点が方向別の安全余裕を加えた車体外形内にあればTrueを返す。"""
+    min_body_x = -LiDARParam.body_rear_length_m
+    max_body_x = (
+        LiDARParam.body_front_length_m
+        + LiDARParam.obstacle_front_clearance_m
+    )
+    max_abs_y = (
+        LiDARParam.body_half_width_m
+        + LiDARParam.obstacle_side_clearance_m
+    )
+
+    for index, distance in enumerate(ranges):
+        if not math.isfinite(distance):
+            continue
+        if distance < range_min or distance > range_max:
+            continue
+
+        angle = angle_min + index * angle_increment
+        body_x = LiDARParam.position_x_m + distance * math.cos(angle)
+        body_y = LiDARParam.position_y_m + distance * math.sin(angle)
+
+        if (
+            min_body_x - 1e-9 <= body_x <= max_body_x + 1e-9
+            and abs(body_y) <= max_abs_y + 1e-9
+        ):
+            return True
+    return False
 
 
 def normalize_axis(raw, minimum, center, maximum, deadband=ADC_DEADBAND):

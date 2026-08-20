@@ -180,7 +180,16 @@ class HumanFollowParam:
 
 class LiDARParam:
     inverted = -1
-    stop_distance_thresh = 0.1
+    # tang2dne_handler/dne_params/P00-B-Standard_E2-Bodysize_CuGoV4.csv と同じ車体外形。
+    body_front_length_m = 0.200
+    body_rear_length_m = 0.430
+    body_half_width_m = 0.250
+    # LiDARは車体中心から前方0.200m、車体前端と同じ位置に取り付ける。
+    position_x_m = 0.200
+    position_y_m = 0.0
+    # 車体外形から確保する方向別の近接停止余裕[m]。
+    obstacle_front_clearance_m = 0.300
+    obstacle_side_clearance_m = 0.100
 
 class JoyParam:
     # joystickの最大値

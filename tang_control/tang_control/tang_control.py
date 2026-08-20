@@ -16,13 +16,14 @@ from cugo_rs485_motor_control.bridge import (
     Rs485DualMotorBridge,
 )
 from cugo_rs485_motor_control.modbus_rtu import ModbusError
-from tang_control.config import Control, LiDARParam, Pin
+from tang_control.config import Control, Pin
 from tang_control.controller_core import (
     FOLLOW,
     IDLE,
     MANUAL,
     TangControlState,
     TangControlRuntime,
+    scan_contains_nearby_obstacle,
 )
 
 
@@ -184,11 +185,21 @@ class TangController(Node):
             self.buzzer_off_at = 0.0
 
     def lidar_callback(self, msg):
-        """停止距離より近い有効な測距値があるかを記憶する。"""
-        self.obstacle_near = any(
-            0.0 < distance < LiDARParam.stop_distance_thresh
-            for distance in msg.ranges
+        """安全余裕を加えた車体外形内に有効な測距点があるか記憶する。"""
+        obstacle_near = scan_contains_nearby_obstacle(
+            msg.ranges,
+            msg.angle_min,
+            msg.angle_increment,
+            msg.range_min,
+            msg.range_max,
         )
+        if obstacle_near and not self.obstacle_near:
+            self.get_logger().warning(
+                "Obstacle entered the body clearance area; stopping motors"
+            )
+        elif self.obstacle_near and not obstacle_near:
+            self.get_logger().info("Body clearance area is clear")
+        self.obstacle_near = obstacle_near
 
     def cmd_vel_callback(self, msg):
         """FOLLOW中だけ最新の速度指令と受信時刻を保存する。"""

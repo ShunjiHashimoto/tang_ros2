@@ -153,6 +153,23 @@ def make_node(mode=MANUAL, speed_mode=LOW):
 
 
 class TangControllerOrchestrationTest(unittest.TestCase):
+    def test_lidar_callback_uses_inflated_body_clearance(self):
+        node, _events = make_node(mode=MANUAL)
+        scan = types.SimpleNamespace(
+            ranges=[0.30],
+            angle_min=0.0,
+            angle_increment=0.0,
+            range_min=0.05,
+            range_max=10.0,
+        )
+
+        node.lidar_callback(scan)
+        self.assertTrue(node.obstacle_near)
+
+        scan.ranges = [0.301]
+        node.lidar_callback(scan)
+        self.assertFalse(node.obstacle_near)
+
     def test_modbus_timeout_reconnects_retries_stop_and_remains_idle(self):
         node, events = make_node(mode=MANUAL)
         original_stop = node.bridge.stop

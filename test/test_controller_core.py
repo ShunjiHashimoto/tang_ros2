@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ハードウェアを使わずにTANG統合制御の基本ロジックを確認する。"""
 
+import math
 import unittest
 
 from cugo_rs485_motor_control.bridge import (
@@ -20,6 +21,7 @@ from tang_control.controller_core import (
     limit_follow_velocity,
     limit_follow_acceleration,
     normalize_axis,
+    scan_contains_nearby_obstacle,
     smooth_command,
 )
 
@@ -107,6 +109,41 @@ class JoystickConversionTest(unittest.TestCase):
         v, w = joystick_to_body_velocity(2000, -100, HIGH)
         self.assertAlmostEqual(Control.manual_high_max_v_mps, v)
         self.assertAlmostEqual(Control.manual_high_max_w_radps, w)
+
+
+class ObstacleDetectionTest(unittest.TestCase):
+    def scan_with_point(self, x, y):
+        distance = (x * x + y * y) ** 0.5
+        angle = math.atan2(y, x)
+        return scan_contains_nearby_obstacle(
+            [distance],
+            angle,
+            0.0,
+            0.05,
+            10.0,
+        )
+
+    def test_front_clearance_is_measured_from_body_front(self):
+        self.assertTrue(self.scan_with_point(0.30, 0.0))
+        self.assertFalse(self.scan_with_point(0.301, 0.0))
+
+    def test_side_clearance_uses_body_half_width(self):
+        self.assertTrue(self.scan_with_point(0.0, 0.35))
+        self.assertFalse(self.scan_with_point(0.0, 0.351))
+
+    def test_front_and_side_clearances_define_corner(self):
+        self.assertTrue(self.scan_with_point(0.30, 0.35))
+        self.assertFalse(self.scan_with_point(0.301, 0.35))
+        self.assertFalse(self.scan_with_point(0.30, 0.351))
+
+    def test_invalid_and_out_of_range_measurements_are_ignored(self):
+        self.assertFalse(scan_contains_nearby_obstacle(
+            [float("nan"), float("inf"), 0.01],
+            0.0,
+            0.1,
+            0.05,
+            10.0,
+        ))
 
 
 class FollowVelocityTest(unittest.TestCase):
