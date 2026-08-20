@@ -23,6 +23,7 @@ from tang_control.controller_core import (
     MANUAL,
     TangControlState,
     TangControlRuntime,
+    joystick_is_active,
     scan_contains_nearby_obstacle,
 )
 
@@ -255,11 +256,19 @@ class TangController(Node):
             self.low_speed_led.off()
             self.high_speed_led.on()
 
-    def manual_control(self):
+    def read_joystick(self):
+        """操舵軸と前後軸のADC値をまとめて読み取る。"""
+        return (
+            self.read_adc(Pin.vrx_channel),
+            self.read_adc(Pin.vry_channel),
+        )
+
+    def manual_control(self, joystick_input=None):
         """ジョイスティックを読み、dry-runの左右モーター指令へ変換する。"""
         # CH0は操舵、CH1は前後操作として実機確認済み。
-        raw_steering = self.read_adc(Pin.vrx_channel)
-        raw_throttle = self.read_adc(Pin.vry_channel)
+        if joystick_input is None:
+            joystick_input = self.read_joystick()
+        raw_steering, raw_throttle = joystick_input
         result = self.runtime.apply_manual_input(
             raw_steering,
             raw_throttle,
@@ -316,6 +325,20 @@ class TangController(Node):
         """1制御周期分のモード、速度、安全停止、手動操作を処理する。"""
         self.update_buzzer()
         mode_changed = self.apply_requested_mode()
+
+        manual_takeover_input = None
+        if self.state.mode == FOLLOW:
+            joystick_input = self.read_joystick()
+            if joystick_is_active(*joystick_input):
+                # 追従指令より操作者の入力を優先する。既存のモード切替経路を
+                # 使うことで、停止指令と追従ノードへの停止通知を先に送る。
+                self.request_mode(MANUAL)
+                mode_changed = self.apply_requested_mode()
+                manual_takeover_input = joystick_input
+                self.get_logger().warning(
+                    "Joystick input detected during FOLLOW; switching to MANUAL LOW"
+                )
+
         if mode_changed and self.state.mode == MANUAL:
             # MANUALは必ず低速で開始する。切替時から速度ボタンが押されて
             # いた場合は採用せず、一度離してからの再押下を要求する。
@@ -333,7 +356,7 @@ class TangController(Node):
             self.last_follow_control_time = 0.0
             return
         if self.state.mode == MANUAL:
-            self.manual_control()
+            self.manual_control(manual_takeover_input)
             return
         if self.state.mode == FOLLOW:
             self.follow_control()

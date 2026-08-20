@@ -133,6 +133,7 @@ def make_node(mode=MANUAL, speed_mode=LOW):
     node.last_cmd_vel = sys.modules["geometry_msgs.msg"].Twist()
     node.last_cmd_vel_time = 0.0
     node.last_follow_control_time = 0.0
+    node.next_manual_log = 0.0
     node.next_follow_log = 0.0
     node.joy_publisher = FakePublisher("joy", events)
     node.mode_publisher = FakePublisher("mode", events)
@@ -147,6 +148,7 @@ def make_node(mode=MANUAL, speed_mode=LOW):
     node.follow_button = FakeInput()
     node.manual_button = FakeInput()
     node.spi = FakeSpi()
+    node.read_adc = lambda _channel: 500
     node.closed = False
     node.get_logger = lambda: FakeLogger()
     return node, events
@@ -218,6 +220,42 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         self.assertEqual(1, joy_event[1][6])
         self.assertEqual(MANUAL, node.state.mode)
         self.assertEqual(LOW, node.state.speed_mode)
+
+    def test_joystick_input_during_follow_switches_to_manual_low(self):
+        node, events = make_node(mode=FOLLOW, speed_mode=HIGH)
+        adc_values = {
+            0: 960,
+            1: 50,
+        }
+        node.read_adc = lambda channel: adc_values[channel]
+
+        node.control_once()
+
+        self.assertEqual(MANUAL, node.state.mode)
+        self.assertEqual(LOW, node.state.speed_mode)
+        self.assertEqual(("stop", True), events[0])
+        joy_event = next(event for event in events if event[0] == "joy")
+        self.assertEqual(1, joy_event[1][6])
+        velocity_event = next(event for event in events if event[0] == "velocity")
+        self.assertGreater(velocity_event[1], 0.0)
+
+    def test_centered_joystick_does_not_leave_follow(self):
+        node, _events = make_node(mode=FOLLOW)
+
+        node.control_once()
+
+        self.assertEqual(FOLLOW, node.state.mode)
+
+    def test_obstacle_still_prevents_motion_after_joystick_takeover(self):
+        node, events = make_node(mode=FOLLOW)
+        node.read_adc = lambda _channel: 960
+        node.obstacle_near = True
+
+        node.control_once()
+
+        self.assertEqual(MANUAL, node.state.mode)
+        self.assertIn(("stop", False), events)
+        self.assertFalse(any(event[0] == "velocity" for event in events))
 
     def test_manual_to_follow_stops_and_publishes_follow_buttons(self):
         node, events = make_node(mode=MANUAL)

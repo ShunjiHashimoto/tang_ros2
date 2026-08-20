@@ -99,6 +99,23 @@ def joystick_to_body_velocity(raw_steering, raw_throttle, speed_mode):
     )
 
 
+def joystick_is_active(raw_steering, raw_throttle):
+    """どちらかの軸が中心デッドゾーン外なら操作中と判定する。"""
+    steering_axis = normalize_axis(
+        raw_steering,
+        STEERING_MIN,
+        STEERING_CENTER,
+        STEERING_MAX,
+    )
+    throttle_axis = normalize_axis(
+        raw_throttle,
+        THROTTLE_MIN,
+        THROTTLE_CENTER,
+        THROTTLE_MAX,
+    )
+    return steering_axis != 0.0 or throttle_axis != 0.0
+
+
 def limit_follow_velocity(v_mps, w_radps):
     """FOLLOW指令をTANG側の最終速度上限に収める。"""
     if not math.isfinite(v_mps) or not math.isfinite(w_radps):

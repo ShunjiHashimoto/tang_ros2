@@ -17,6 +17,7 @@ from tang_control.controller_core import (
     MANUAL,
     TangControlState,
     TangControlRuntime,
+    joystick_is_active,
     joystick_to_body_velocity,
     limit_follow_velocity,
     limit_follow_acceleration,
@@ -109,6 +110,11 @@ class JoystickConversionTest(unittest.TestCase):
         v, w = joystick_to_body_velocity(2000, -100, HIGH)
         self.assertAlmostEqual(Control.manual_high_max_v_mps, v)
         self.assertAlmostEqual(Control.manual_high_max_w_radps, w)
+
+    def test_activity_uses_the_same_center_deadband_as_manual_control(self):
+        self.assertFalse(joystick_is_active(465, 535))
+        self.assertTrue(joystick_is_active(464, 500))
+        self.assertTrue(joystick_is_active(500, 536))
 
 
 class ObstacleDetectionTest(unittest.TestCase):
