@@ -15,9 +15,11 @@ from cugo_rs485_motor_control.bridge import (
     MotorBridgeConfig,
     Rs485DualMotorBridge,
 )
+from cugo_rs485_motor_control.modbus_rtu import ModbusError
 from tang_control.config import Control, LiDARParam, Pin
 from tang_control.controller_core import (
     FOLLOW,
+    IDLE,
     MANUAL,
     TangControlState,
     TangControlRuntime,
@@ -46,6 +48,7 @@ class TangController(Node):
         self.last_cmd_vel_time = 0.0
         self.last_follow_control_time = 0.0
         self.buzzer_off_at = 0.0
+        self.motor_fault_active = False
 
         # 安全のため既定はdry-runとし、launch引数で明示した場合だけ
         # 実機出力する。
@@ -330,12 +333,55 @@ class TangController(Node):
         self.runtime.reset_motion_filters()
         self.last_follow_control_time = 0.0
 
+    def control_once_with_motor_recovery(self):
+        """Modbus通信異常時はIDLEへ退避し、再接続後に停止を再試行する。"""
+        if self.motor_fault_active:
+            self.requested_mode = None
+            return self.recover_motor_connection()
+
+        try:
+            self.control_once()
+            return True
+        except ModbusError as error:
+            self.get_logger().error(
+                f"RS-485 motor command failed: {error}; "
+                "switching to IDLE and retrying stop after reconnect"
+            )
+            self.motor_fault_active = True
+            self.requested_mode = None
+            self.state.mode = IDLE
+            self.runtime.reset_motion_filters()
+            self.last_cmd_vel_time = 0.0
+            self.last_follow_control_time = 0.0
+            self.update_indicators()
+            self.publish_mode()
+            return self.recover_motor_connection()
+
+    def recover_motor_connection(self):
+        """RS-485を再接続し、両輪への強制停止が成功するまで走行を禁止する。"""
+        try:
+            self.bridge.reconnect()
+            self.bridge.stop(force=True)
+        except ModbusError as error:
+            self.get_logger().error(
+                f"RS-485 reconnect/stop retry failed: {error}; remaining in IDLE"
+            )
+            self.motor_fault_active = True
+            return False
+
+        self.motor_fault_active = False
+        self.get_logger().warning(
+            "RS-485 reconnected and stop retry succeeded; "
+            "remaining in IDLE until a mode is selected again"
+        )
+        return True
+
     def start(self):
         """ROSイベントと車体制御を50ms周期で処理する。"""
         try:
             while rclpy.ok():
                 rclpy.spin_once(self, timeout_sec=CONTROL_PERIOD_SEC)
-                self.control_once()
+                self.control_once_with_motor_recovery()
         finally:
             self.close_hardware()
 
