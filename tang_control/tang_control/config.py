@@ -191,6 +191,9 @@ class LiDARParam:
     # 車体外形から確保する方向別の近接停止余裕[m]。
     obstacle_front_clearance_m = 0.300
     obstacle_side_clearance_m = 0.100
+    # 手動操縦中は操作者が周囲を確認するため、停止余裕を縮小する。
+    manual_obstacle_front_clearance_m = 0.050
+    manual_obstacle_side_clearance_m = 0.050
 
 class JoyParam:
     # joystickの最大値

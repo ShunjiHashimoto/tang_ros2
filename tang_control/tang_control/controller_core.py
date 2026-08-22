@@ -28,16 +28,23 @@ def scan_contains_nearby_obstacle(
     angle_increment,
     range_min,
     range_max,
+    front_clearance_m=None,
+    side_clearance_m=None,
 ):
     """LiDAR点が方向別の安全余裕を加えた車体外形内にあればTrueを返す。"""
+    if front_clearance_m is None:
+        front_clearance_m = LiDARParam.obstacle_front_clearance_m
+    if side_clearance_m is None:
+        side_clearance_m = LiDARParam.obstacle_side_clearance_m
+
     min_body_x = -LiDARParam.body_rear_length_m
     max_body_x = (
         LiDARParam.body_front_length_m
-        + LiDARParam.obstacle_front_clearance_m
+        + front_clearance_m
     )
     max_abs_y = (
         LiDARParam.body_half_width_m
-        + LiDARParam.obstacle_side_clearance_m
+        + side_clearance_m
     )
 
     for index, distance in enumerate(ranges):

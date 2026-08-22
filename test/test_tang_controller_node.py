@@ -130,6 +130,8 @@ def make_node(mode=MANUAL, speed_mode=LOW):
     node.runtime = TangControlRuntime(node.bridge, node.state)
     node.requested_mode = None
     node.obstacle_near = False
+    node.standard_obstacle_near = False
+    node.manual_obstacle_near = False
     node.last_cmd_vel = sys.modules["geometry_msgs.msg"].Twist()
     node.last_cmd_vel_time = 0.0
     node.last_follow_control_time = 0.0
@@ -155,10 +157,10 @@ def make_node(mode=MANUAL, speed_mode=LOW):
 
 
 class TangControllerOrchestrationTest(unittest.TestCase):
-    def test_lidar_callback_uses_inflated_body_clearance(self):
+    def test_lidar_callback_uses_manual_clearance_in_manual_mode(self):
         node, _events = make_node(mode=MANUAL)
         scan = types.SimpleNamespace(
-            ranges=[0.30],
+            ranges=[0.05],
             angle_min=0.0,
             angle_increment=0.0,
             range_min=0.05,
@@ -168,9 +170,25 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         node.lidar_callback(scan)
         self.assertTrue(node.obstacle_near)
 
-        scan.ranges = [0.301]
+        scan.ranges = [0.051]
         node.lidar_callback(scan)
         self.assertFalse(node.obstacle_near)
+
+    def test_mode_change_uses_cached_clearance_for_selected_mode(self):
+        node, _events = make_node(mode=MANUAL)
+        scan = types.SimpleNamespace(
+            ranges=[0.20],
+            angle_min=0.0,
+            angle_increment=0.0,
+            range_min=0.05,
+            range_max=10.0,
+        )
+        node.lidar_callback(scan)
+        self.assertFalse(node.obstacle_near)
+
+        node.requested_mode = FOLLOW
+        node.apply_requested_mode()
+        self.assertTrue(node.obstacle_near)
 
     def test_modbus_timeout_reconnects_retries_stop_and_remains_idle(self):
         node, events = make_node(mode=MANUAL)
@@ -250,6 +268,8 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         node, events = make_node(mode=FOLLOW)
         node.read_adc = lambda _channel: 960
         node.obstacle_near = True
+        node.standard_obstacle_near = True
+        node.manual_obstacle_near = True
 
         node.control_once()
 

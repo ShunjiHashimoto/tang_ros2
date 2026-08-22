@@ -131,6 +131,7 @@ class ObstacleDetectionTest(unittest.TestCase):
             0.0,
             0.05,
             10.0,
+            **kwargs,
         )
 
     def test_front_clearance_is_measured_from_body_front(self):
@@ -145,6 +146,16 @@ class ObstacleDetectionTest(unittest.TestCase):
         self.assertTrue(self.scan_with_point(0.30, 0.35))
         self.assertFalse(self.scan_with_point(0.301, 0.35))
         self.assertFalse(self.scan_with_point(0.30, 0.351))
+
+    def test_manual_clearance_is_five_centimeters(self):
+        kwargs = {
+            "front_clearance_m": LiDARParam.manual_obstacle_front_clearance_m,
+            "side_clearance_m": LiDARParam.manual_obstacle_side_clearance_m,
+        }
+        self.assertTrue(self.scan_with_point(0.05, 0.0, **kwargs))
+        self.assertFalse(self.scan_with_point(0.051, 0.0, **kwargs))
+        self.assertTrue(self.scan_with_point(0.0, 0.30, **kwargs))
+        self.assertFalse(self.scan_with_point(0.0, 0.301, **kwargs))
 
     def test_invalid_and_out_of_range_measurements_are_ignored(self):
         self.assertFalse(scan_contains_nearby_obstacle(

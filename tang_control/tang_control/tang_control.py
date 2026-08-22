@@ -16,7 +16,7 @@ from cugo_rs485_motor_control.bridge import (
     Rs485DualMotorBridge,
 )
 from cugo_rs485_motor_control.modbus_rtu import ModbusError
-from tang_control.config import Control, Pin
+from tang_control.config import Control, LiDARParam, Pin
 from tang_control.controller_core import (
     FOLLOW,
     IDLE,
@@ -43,6 +43,8 @@ class TangController(Node):
         # これにより、モード変更と停止指令が別スレッドで競合するのを防ぐ。
         self.requested_mode = None
         self.obstacle_near = False
+        self.standard_obstacle_near = False
+        self.manual_obstacle_near = False
         self.closed = False
         self.next_manual_log = 0.0
         self.next_follow_log = 0.0
@@ -156,6 +158,7 @@ class TangController(Node):
         previous = self.state.mode
         # 入力元を変更する前に、左右モーターを必ず停止させる。
         self.runtime.select_mode(selected)
+        self.update_active_obstacle_state()
         if previous == FOLLOW:
             # FOLLOWを離れる場合は追従ノードにも停止ボタンを送る。
             self.publish_fake_joy_button_press(Pin.followme_stop_button)
@@ -185,15 +188,13 @@ class TangController(Node):
             self.buzzer.off()
             self.buzzer_off_at = 0.0
 
-    def lidar_callback(self, msg):
-        """安全余裕を加えた車体外形内に有効な測距点があるか記憶する。"""
-        obstacle_near = scan_contains_nearby_obstacle(
-            msg.ranges,
-            msg.angle_min,
-            msg.angle_increment,
-            msg.range_min,
-            msg.range_max,
-        )
+    def update_active_obstacle_state(self):
+        """現在モードの停止余裕に対応する障害物判定を反映する。"""
+        if self.state.mode == MANUAL:
+            obstacle_near = self.manual_obstacle_near
+        else:
+            obstacle_near = self.standard_obstacle_near
+
         if obstacle_near and not self.obstacle_near:
             self.get_logger().warning(
                 "Obstacle entered the body clearance area; stopping motors"
@@ -201,6 +202,23 @@ class TangController(Node):
         elif self.obstacle_near and not obstacle_near:
             self.get_logger().info("Body clearance area is clear")
         self.obstacle_near = obstacle_near
+
+    def lidar_callback(self, msg):
+        """通常時とMANUAL時の停止余裕で、有効な測距点の有無を記憶する。"""
+        scan_args = (
+            msg.ranges,
+            msg.angle_min,
+            msg.angle_increment,
+            msg.range_min,
+            msg.range_max,
+        )
+        self.standard_obstacle_near = scan_contains_nearby_obstacle(*scan_args)
+        self.manual_obstacle_near = scan_contains_nearby_obstacle(
+            *scan_args,
+            front_clearance_m=LiDARParam.manual_obstacle_front_clearance_m,
+            side_clearance_m=LiDARParam.manual_obstacle_side_clearance_m,
+        )
+        self.update_active_obstacle_state()
 
     def cmd_vel_callback(self, msg):
         """FOLLOW中だけ最新の速度指令と受信時刻を保存する。"""
