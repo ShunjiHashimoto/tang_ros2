@@ -310,7 +310,7 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         velocity_event = next(event for event in events if event[0] == "velocity")
         self.assertAlmostEqual(Control.follow_accel_limit_mps2 * 0.05, velocity_event[1])
         self.assertAlmostEqual(
-            Control.command_ema_alpha * 3.141592653589793 / 3.0,
+            Control.command_ema_alpha * Control.follow_max_w_radps,
             velocity_event[2],
         )
 

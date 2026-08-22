@@ -107,10 +107,11 @@ class Control:
     # 同じ取付変更でCH0も反転したため、西側への操作をROSの正角速度にする。
     manual_steering_sign = 1.0
     follow_max_v_mps = 0.15
-    follow_max_w_radps = math.pi / 3.0
+    # DNE実機調整値のFollowYawRate=15 deg/sに合わせる。
+    follow_max_w_radps = math.radians(15.0)
     follow_angular_sign = -1.0
-    command_ema_alpha = 0.1
-    follow_accel_limit_mps2 = 0.05
+    command_ema_alpha = 0.75
+    follow_accel_limit_mps2 = 1.0
     follow_cmd_timeout_sec = 0.5
 
     wheel_radius_left = 0.03858
@@ -180,12 +181,12 @@ class HumanFollowParam:
 
 class LiDARParam:
     inverted = -1
-    # tang2dne_handler/dne_params/P00-B-Standard_E2-Bodysize_CuGoV4.csv と同じ車体外形。
-    body_front_length_m = 0.200
+    # 後方長と幅はP00-Bと同じ。前方は最前端のLiDARまでを車体外形に含める。
+    body_front_length_m = 0.320
     body_rear_length_m = 0.430
     body_half_width_m = 0.250
-    # LiDARは車体中心から前方0.200m、車体前端と同じ位置に取り付ける。
-    position_x_m = 0.200
+    # 実機計測値：LiDARは旋回中心から前方0.320m。
+    position_x_m = 0.320
     position_y_m = 0.0
     # 車体外形から確保する方向別の近接停止余裕[m]。
     obstacle_front_clearance_m = 0.300

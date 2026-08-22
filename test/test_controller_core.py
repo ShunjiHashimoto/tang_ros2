@@ -8,7 +8,7 @@ from cugo_rs485_motor_control.bridge import (
     MotorBridgeConfig,
     Rs485DualMotorBridge,
 )
-from tang_control.config import Control
+from tang_control.config import Control, LiDARParam
 from tang_control.controller_core import (
     FOLLOW,
     HIGH,
@@ -118,7 +118,11 @@ class JoystickConversionTest(unittest.TestCase):
 
 
 class ObstacleDetectionTest(unittest.TestCase):
-    def scan_with_point(self, x, y):
+    def test_lidar_and_front_extent_match_tang_measurement(self):
+        self.assertAlmostEqual(0.32, LiDARParam.position_x_m)
+        self.assertAlmostEqual(0.32, LiDARParam.body_front_length_m)
+
+    def scan_with_point(self, x, y, **kwargs):
         distance = (x * x + y * y) ** 0.5
         angle = math.atan2(y, x)
         return scan_contains_nearby_obstacle(
@@ -153,9 +157,12 @@ class ObstacleDetectionTest(unittest.TestCase):
 
 
 class FollowVelocityTest(unittest.TestCase):
-    def test_command_ema_matches_legacy_tang_smoothing(self):
-        self.assertAlmostEqual(0.1, smooth_command(1.0, 0.0))
-        self.assertAlmostEqual(0.19, smooth_command(1.0, 0.1))
+    def test_follow_turn_limit_matches_dne_fifteen_degrees_per_second(self):
+        self.assertAlmostEqual(math.radians(15.0), Control.follow_max_w_radps)
+
+    def test_command_ema_matches_tang_follow_smoothing(self):
+        self.assertAlmostEqual(0.75, smooth_command(1.0, 0.0))
+        self.assertAlmostEqual(0.775, smooth_command(1.0, 0.1))
 
     def test_follow_velocity_is_clamped_in_both_directions(self):
         self.assertEqual(
@@ -173,7 +180,7 @@ class FollowVelocityTest(unittest.TestCase):
 
     def test_follow_acceleration_is_limited_but_deceleration_is_immediate(self):
         self.assertAlmostEqual(
-            0.005,
+            0.1,
             limit_follow_acceleration(0.15, 0.0, 0.1),
         )
         self.assertEqual(0.0, limit_follow_acceleration(0.0, 0.15, 0.1))
