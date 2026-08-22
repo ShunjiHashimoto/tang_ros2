@@ -47,7 +47,7 @@ def install_ros_stubs():
 
 install_ros_stubs()
 
-from tang_control.controller_core import FOLLOW, HIGH, LOW, MANUAL
+from tang_control.controller_core import FOLLOW, HIGH, IDLE, LOW, MANUAL
 from tang_control.config import Control
 from tang_control.tang_control import TangController
 from cugo_rs485_motor_control.modbus_rtu import ModbusTimeoutError
@@ -145,6 +145,7 @@ def make_node(mode=MANUAL, speed_mode=LOW):
     node.buzzer = FakeLed("buzzer", events)
     node.buzzer_off_at = 0.0
     node.motor_fault_active = False
+    node.motor_fault_mode = None
     node.low_speed_button = FakeInput()
     node.high_speed_button = FakeInput()
     node.follow_button = FakeInput()
@@ -190,7 +191,7 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         node.apply_requested_mode()
         self.assertTrue(node.obstacle_near)
 
-    def test_modbus_timeout_reconnects_retries_stop_and_remains_idle(self):
+    def test_modbus_timeout_reconnects_retries_stop_and_restores_manual(self):
         node, events = make_node(mode=MANUAL)
         original_stop = node.bridge.stop
         stop_calls = 0
@@ -210,7 +211,51 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         self.assertEqual(2, stop_calls)
         self.assertIn(("reconnect",), events)
         self.assertIn(("stop", True), events)
-        self.assertEqual("idle", node.state.mode)
+        self.assertEqual(MANUAL, node.state.mode)
+        self.assertFalse(node.motor_fault_active)
+        self.assertIsNone(node.motor_fault_mode)
+
+    def test_follow_recovery_waits_for_fresh_cmd_vel(self):
+        node, events = make_node(mode=FOLLOW)
+        original_stop = node.bridge.stop
+        stop_calls = 0
+
+        def fail_once_stop(force=False):
+            nonlocal stop_calls
+            stop_calls += 1
+            if stop_calls == 1:
+                raise ModbusTimeoutError("timeout while reading 2 bytes")
+            return original_stop(force=force)
+
+        node.bridge.stop = fail_once_stop
+        node.obstacle_near = True
+        node.last_cmd_vel_time = 123.0
+
+        self.assertTrue(node.control_once_with_motor_recovery())
+
+        self.assertEqual(FOLLOW, node.state.mode)
+        self.assertEqual(0.0, node.last_cmd_vel_time)
+        events.clear()
+        node.control_once()
+        self.assertIn(("stop", False), events)
+        self.assertFalse(any(event[0] == "velocity" for event in events))
+
+    def test_idle_recovery_remains_idle(self):
+        node, _events = make_node(mode=IDLE)
+        original_stop = node.bridge.stop
+        stop_calls = 0
+
+        def fail_once_stop(force=False):
+            nonlocal stop_calls
+            stop_calls += 1
+            if stop_calls == 1:
+                raise ModbusTimeoutError("timeout while reading 2 bytes")
+            return original_stop(force=force)
+
+        node.bridge.stop = fail_once_stop
+
+        self.assertTrue(node.control_once_with_motor_recovery())
+        self.assertEqual(IDLE, node.state.mode)
         self.assertFalse(node.motor_fault_active)
 
     def test_failed_stop_retry_keeps_node_in_faulted_idle(self):
@@ -227,6 +272,12 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         self.assertIn(("reconnect",), events)
         self.assertEqual("idle", node.state.mode)
         self.assertTrue(node.motor_fault_active)
+        self.assertEqual(MANUAL, node.motor_fault_mode)
+
+        node.bridge.stop = FakeBridge(events).stop
+        self.assertTrue(node.control_once_with_motor_recovery())
+        self.assertEqual(MANUAL, node.state.mode)
+        self.assertFalse(node.motor_fault_active)
 
     def test_follow_to_manual_stops_before_follow_stop_and_resets_low(self):
         node, events = make_node(mode=FOLLOW, speed_mode=HIGH)
