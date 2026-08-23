@@ -1,175 +1,221 @@
-# 最小変更でのCuGoV4・TANG統合計画
+# CuGoV4・TANG統合仕様と実装状況
 
-## 方針
+## 目的と方針
 
-新しい制御ノード群は増やさず、既存の `TangController` 1ノードにモード選択、3種類の入力処理、RS-485モータ指令を集約します。
+TANGのモード選択、MANUAL・FOLLOW入力、安全停止、CuGoV4へのRS-485モータ指令を、既存の`TangController`へ集約する。
 
-起動時は必ず `IDLE` とし、GPIOボタンが起動後に押されるまでモータ停止を維持します。起動時のGPIO状態、ジョイスティック中立、プロポ中立は確認しません。
+- 起動時は必ず`IDLE`とし、モードボタンが押されるまで停止を維持する。
+- 現行の走行モードは`MANUAL`と`FOLLOW`とする。
+- PROPOはモード選択方法が確定するまで統合対象外とする。
+- DNE運転は`TangController`と同時起動せず、別の起動構成で扱う。
+- `/dev/ttyUSB0`を開く制御プロセスは常に1つだけにする。
+- 旧GPIO PWM制御は互換用としてコードを残すが、現行`TangController`では使用しない。
 
-## 状態遷移
+## 現在の実装状況（2026年8月23日）
 
-- `IDLE`
-  - 起動時の初期状態。
-  - モータ停止、追従停止。
-  - GPIO14のモード表示LEDは消灯する。
-  - 起動前から押されていたボタンは採用せず、起動後の新しい押下でモード選択する。
+### 完了
 
-- `MANUAL`
-  - GPIO16のみを押すと遷移。
-  - MCP3004から車載ジョイスティックを読み、その時点の操作量を即時反映する。
-  - 異なるモードからMANUALへ遷移するたびに、速度設定を必ず低速に初期化する。
-  - GPIO4を押下すると低速、GPIO3を押下すると高速を選択し、次の速度選択ボタン押下まで設定を記憶する。ボタンを離しても選択速度は維持する。
-  - 低速上限は `0.15 m/s・0.6 rad/s`、高速上限は `0.30 m/s・1.0 rad/s`。
-  - GPIO3/4同時押しは低速を優先する。
-  - GPIO3/4の速度選択ボタンにも30〜50 msを目安とするチャタリング除去を設ける。
-  - MANUAL以外でのGPIO3/4操作は無視し、次回MANUAL遷移時の低速初期化に影響させない。
-  - GPIO14のモード表示LEDは消灯する。
+- GPIO16によるFOLLOW選択、GPIO21によるMANUAL選択。
+- GPIO14によるモード表示（FOLLOWで点灯、IDLE・MANUALで消灯）。
+- GPIO3・GPIO4による低速・高速切替と、GPIO25・GPIO26による速度表示。
+- MANUAL・FOLLOWともモード遷移時は必ず低速へ初期化。
+- MANUALのジョイスティック入力、EMA平滑化、速度上限、RS-485指令への変換。
+- FOLLOWの仮想`/joy`開始・停止、`/cmd_vel`保存、0.5秒タイムアウト、速度モード別制限。
+- FOLLOW中のジョイスティック操作を優先し、MANUAL低速へ切り替える処理。
+- 車体外形とLiDAR位置を考慮した近接障害物停止。
+- Modbus異常時の一時IDLE化、再接続、強制停止確認、直前モードへの復帰。
+- FOLLOWの通信復旧中に`/follow_me/control`へ`pause`、復旧後に`resume`を送る連携。
+- 統合launchからURG、TF、人物追従ノード、`TangController`を起動する構成。
+- コアテスト38件、TangControllerノードテスト24件の自動確認。
 
-- `FOLLOW`
-  - GPIO21のみを押すと遷移。
-  - `TangController` が `/joy` へ仮想ボタン7を送り、`icart_mini_leg_tracker` の追従を開始する。
-  - ゲームパッドや `joy_node` は使用せず、`TangController` が `sensor_msgs/Joy` を仮想的に発行する。
-  - `icart_mini_leg_tracker` の既存 `/cmd_vel` を使用する。
-  - `/cmd_vel` コールバックではモータを直接動かさず、最新指令を保存するだけに変更する。
-  - 0.5秒以上指令が届かなければ停止する。
-  - 他モードへ移ると、`TangController` が先にモータを停止し、続けて `/joy` へ仮想ボタン6を送って追従処理を停止する。
-  - 仮想ボタン番号は現行icartと共通の「追従開始=7、追従停止=6」とする。
-  - GPIO14のモード表示LEDは連続点灯する。
+### 保留・実機確認が必要
 
-- `PROPO`
-  - GPIO16と21を150 ms以内に押すと遷移。
-  - CH-C/D/Hから現在の操作量を読み、そのまま反映する。
-  - GPIOは `CH-C=24、CH-D=23、CH-H=7` とする。
-  - GPIO7は未使用コネクタへ裏配線する。
-  - 3chのいずれかが100 ms以上途絶えた場合だけ停止し、復帰後は現在の操作量を即時反映する。
-  - GPIO14のモード表示LEDは、0.5秒点灯・4.5秒消灯の5秒周期で点滅する。
+- PROPOのモード選択方法とTANGへの統合。
+- DNE側`rs485Handler.py`への車体速度上限とCuGoV4ブリッジの統合確認。
+- Raspberry Pi停止やプロセス強制終了時にもドライバ単体で停止する通信タイムアウト／ハートビート。
+- 異常時の瞬時停止を使用するかどうかの実機評価。
+- USB-RS485切断、電源断、再接続を含むフェイルセーフ試験。
 
-起動後はGPIO16/21の両方が一度離されるまでモード選択を受け付けません。モード選択ボタンには30〜50 msを目安とするチャタリング除去を設けます。モード判定は最初の押下から150 ms待って両GPIOを確認します。現在と同じモードが再選択された場合は、停止、再初期化、追従開始信号の再送を行わず無視します。異なるモードへの切替時には一度停止指令を送り、GPIO14 LEDの点滅周期をリセットした後、選択モードの現在入力を反映します。
+## 状態とモード遷移
 
-## 最小限のコード変更
+### IDLE
 
-### tang_ros2
+- 起動直後の初期状態。
+- 左右モータ停止を維持する。
+- GPIO14のモードLEDは消灯する。
+- `/cmd_vel`は採用しない。
+- GPIO3・GPIO4を押しても速度モードは変更しない。
 
-- `TangController.mode` の初期値を `idle` に変更する。
-- 現在のGPIO PWM用 `Motor` を、cugoの `Rs485DualMotorBridge` に置き換える。
-- 既存のループ構造を維持し、`idle/manual/follow/propo` の4分岐にする。
-- プロポ受信は既存 `RcPwmReceiver` と `VehicleControl` を再利用する。
-- `/cmd_vel` はFOLLOW時だけ採用し、MANUAL・PROPO・IDLEでは無視する。
-- モード変更時、終了時、例外時には必ず左右停止を送る。
-- Modbus通信異常時は停止指令を試みて `IDLE` に戻し、再接続後もモードボタンの再操作を要求する。ただし、USB-RS485切断時は停止指令も送信できないため、今回の試作ではソフトウェアだけでモータ停止を保証しない。
-- `/tang/mode` を `std_msgs/String` で発行し、現在モードを確認可能にする。
-- 既存のLiDAR近距離停止処理は変更せず維持する。
-- 旧GPIO PWM関連コードは直ちに削除せず、launchから使わない状態にして差分を抑える。
+### MANUAL
 
-### cugo_rs485_motor_control
+- GPIO21の新しい押下で遷移する。
+- 遷移前に左右へ強制停止を送り、速度モードをLOWへ戻す。
+- MCP3004のCH0を操舵、CH1を前後入力として使用する。
+- GPIO3でLOW、GPIO4でHIGHを選択し、次の単独押下まで保持する。
+- GPIO3・GPIO4の同時押しは無視し、現在値を保持する。
+- 速度ボタンには50 msのチャタリング除去を適用する。
+- MANUALの周期的な速度・rpmログは、実機ターミナルの出力量を抑えるため停止している。
+- GPIO14のモードLEDは消灯する。
 
-- 制御ロジック自体は変更しない。
-- `propo_control.py` 内の `RcPwmReceiver`、`VehicleControl`、`Rs485DualMotorBridge` をTANGからimportできるよう、最小限のPythonパッケージ設定だけ追加する。
-- 既存CLIの動作は維持する。
-- `propo_control.py`、`TangController`、DNE用 `rs485Handler.py` は同時起動しない。RS-485を開くプロセスは常に1つだけにする。
+### FOLLOW
 
-車体パラメータは現行cugo設定を使います。
+- GPIO16の新しい押下で遷移する。
+- 遷移前に左右へ強制停止を送り、速度モードをLOWへ戻す。
+- `/joy`へロック解除ボタン4と追従開始ボタン7を送る。
+- 人物追従ノードが発行する`/cmd_vel`を保存し、50 ms周期の制御ループでモータへ反映する。
+- 受信から0.5秒を超えた`/cmd_vel`は使用せず停止する。
+- GPIO3・GPIO4でLOW・HIGHを切り替えられる。
+- LOWで並進速度を制限した場合は角速度も同じ比率で下げ、カーブ半径を維持する。
+- FOLLOWを離れるときは、先にモータを停止してから`/joy`へ追従停止ボタン6を送る。
+- FOLLOW中にジョイスティックがデッドゾーン外へ入ると、MANUAL LOWへ切り替える。
+- GPIO14のモードLEDは点灯する。
 
-- 車輪半径：`0.03858 m`
-- トレッド：`0.376 m`
-- 減速比：20
-- 左右符号：`-1 / +1`
-- 最大回転数：2600 rpm
-- 最低回転数：80 rpm
-- 発進しきい値：120 rpm
+### モード選択の共通仕様
 
-### 参考：モードごとの速度上限
+- モードボタンには50 msのチャタリング除去を適用する。
+- 現在と同じモードの再選択は無視し、停止や追従開始信号の再送を行わない。
+- モード変更では、入力元を変更する前に左右へ強制停止を送る。
+- 遷移時点ですでに押されていた速度ボタンは採用せず、一度離してからの再押下を要求する。
+- モード変更時はブザーを0.2秒鳴らし、`/tang/mode`へ現在モードを発行する。
 
-並進速度の `m/s` から `km/h` への変換は `m/s × 3.6` とする。現在の計画値および既存プログラムの設定値は次のとおりとする。
+## 速度・旋回設定
 
-| モード | 最大並進速度 | 時速 | 最大角速度 | 値の根拠 |
-| --- | ---: | ---: | ---: | --- |
-| MANUAL低速 | `0.15 m/s` | `0.54 km/h` | `0.6 rad/s` | 本計画で定めるTANG用上限 |
-| MANUAL高速 | `0.30 m/s` | `1.08 km/h` | `1.0 rad/s` | 本計画で定めるTANG用上限 |
-| PROPO | `0.2625 m/s` | `0.945 km/h` | `1.57 rad/s` | 現行 `propo_control.py` のデフォルト値 |
-| FOLLOW | `0.25 m/s` | `0.90 km/h` | `π/3 ≈ 1.047 rad/s` | 現行 `icart_mini_leg_tracker` の上限 |
-| DNE | `0.417 m/s` | `1.5 km/h` | `80 deg/s ≈ 1.396 rad/s` | CuGo V4の公称最高速度 `1.8 km/h` より低い本計画のDNE用上限 |
+現行設定の参照元は`tang_control/tang_control/config.py`の`Control`とする。
 
-PROPOのCH-Hは現行設定で出力倍率を約50〜100%の範囲で変更する。そのため並進速度の目安は、CH-H最小時が約 `0.131 m/s（0.473 km/h）`、CH-H最大時が `0.2625 m/s（0.945 km/h）` となる。
+| モード | 速度設定 | 最大並進速度 | 時速 | 最大角速度 |
+| --- | --- | ---: | ---: | ---: |
+| MANUAL | LOW | `0.15 m/s` | `0.54 km/h` | `0.6 rad/s` |
+| MANUAL | HIGH | `0.30 m/s` | `1.08 km/h` | `1.0 rad/s` |
+| FOLLOW | LOW | `0.15 m/s` | `0.54 km/h` | 下記のFOLLOW旋回上限 |
+| FOLLOW | HIGH | `0.30 m/s` | `1.08 km/h` | 下記のFOLLOW旋回上限 |
+| PROPO | 保留 | `0.2625 m/s` | `0.945 km/h` | `1.57 rad/s` |
+| DNE | 別構成 | `0.4167 m/s` | `1.5 km/h` | `1.396 rad/s`（80 deg/s） |
 
-### 参考：速度を変更する場所
+FOLLOWの旋回設定は次のとおり。
 
-- MANUALの低速・高速上限は、統合実装時に `tang_control/tang_control/config.py` へモード別の並進速度・角速度設定として追加し、以後はそこで変更する。現行コードには本計画の `m/s`・`rad/s` 上限はまだ実装されていない。
-- PROPOの現行デフォルトは `cugo_rs485_motor_control/scripts/propo_control.py` の `DEFAULT_MAX_V_KMH` と `DEFAULT_MAX_W_RADPS` で定義されている。単体CLIでは `--max-v-kmh` と `--max-w-radps` で一時的に変更できる。TANG統合後のPROPO上限は `tang_control/tang_control/config.py` へ集約し、通常運用で `propo_control.py` と二重管理しない。
-- FOLLOWの指令生成側の上限は `icart_mini_ros2/icart_mini_leg_tracker/include/icart_mini_leg_tracker/leg_cluster_tracking.hpp` の `MAX_SPEED` と `MAX_TURN_SPEED` で定義されている。この値を変更した場合は `icart_mini_leg_tracker` の再ビルドが必要となる。
-- TANG統合後は、FOLLOWも `tang_control/tang_control/config.py` に最終安全上限を持ち、`/cmd_vel` がそれを超えても `TangController` 側で制限する。追従アルゴリズムの速度特性を変える場合は追従ノード側、CuGoの最終上限だけを変える場合はTANG側を変更する。
-- DNE運転の最大並進速度は `1.5 km/h（0.4167 m/s）` とする。統合時に `tang2dne_handler/scripts/rs485Handler.py` へDNE用の最終車体速度上限を追加し、DNEからこれを超える指令が届いてもRS-485ブリッジへ渡す前に制限する。
-- `Rs485DualMotorBridge` の `max_rpm=2600` はモータ保護・車体変換上の最終上限であり、MANUAL・PROPO・FOLLOWの操作速度上限とは別の設定とする。モード速度を調整する目的で `max_rpm` を変更しない。
-- DNEの `1.5 km/h` 制限は車体速度として適用し、`rs485_motor_bridge.py` のモータ保護上限 `max_rpm=2600` は変更しない。
+- 通常最大角速度：`15 deg/s`（約`0.262 rad/s`）
+- 極端角度の判定境界：`45 deg`
+- 45度を超えた場合の最大角速度：`35 deg/s`（約`0.611 rad/s`）
+- TANG側の最終角速度上限：`35 deg/s`
+- `angular.z`の符号補正：`-1.0`
+- EMA係数：`0.75`
+- FOLLOW並進加速度上限：`1.0 m/s²`
 
-速度設定を変更した際は、クローラを浮かせた状態で左右符号と回転数を確認した後、低速・無人区画で停止距離と旋回速度を再評価する。
+`tang_leg_tracker.launch.py`は`Control.follow_high_max_v_mps`とFOLLOW旋回設定を参照する。したがってTANG用FOLLOW速度・旋回値は`config.py`だけで変更し、launchへ数値を重複定義しない。
 
-### 起動構成
+## RS-485モータ制御
 
-- TANG用launchではURG、`leg_cluster_tracking_node`、`TangController` のみ起動する。
-- YPSpur、F710用teleop、旧GPIO PWMモータ制御は起動しない。
-- `icart_mini_leg_tracker` のコードと `/cmd_vel` 名は変更しない。
-- 自動起動スクリプトはTANG用launchを指定する。
+現行`TangController`は`cugo_rs485_motor_control`の`Rs485DualMotorBridge`を使用する。
 
-### DNEとの関係
+| 項目 | 設定値 |
+| --- | ---: |
+| デバイス | `/dev/ttyUSB0` |
+| ボーレート | `9600` |
+| 左スレーブID | `2` |
+| 右スレーブID | `1` |
+| 車輪半径 | `0.03858 m` |
+| トレッド | `0.376 m` |
+| 減速比 | `20` |
+| 左右モータ符号 | `-1 / +1` |
+| モータ最終上限 | `2600 rpm` |
+| 最低回転数 | `80 rpm` |
+| 発進しきい値 | `120 rpm` |
 
-- DNEからの指令は `tang2dne_handler` の `rs485Handler.py` で受信し、同ハンドラからRS-485経由でCuGoを制御する。
-- DNEから受信する並進速度指令は、`rs485Handler.py` で最大 `1.5 km/h（0.4167 m/s）` に制限してからRS-485ブリッジへ渡す。
-- DNE制御は、MANUAL・FOLLOW・PROPOを扱う `TangController` とは別プログラム・別起動構成とする。
-- DNE制御時は `TangController` を起動せず、TANG制御時は `rs485Handler.py` を起動しない。
-- 入力処理とプログラムは独立とするが、RS-485ポートとモータの所有者は必ず1プロセスに限定する。
-- 今回のTANG統合実装には、DNE指令の取り込みやDNE/TANG間のモード切替は含めない。
-- DNE運転時に起動する制御プロセスは `tang2dne_handler/scripts/rs485Handler.py` だけとする。`cugo_rs485_motor_control` は同ハンドラからRS-485通信クラスをimportするライブラリとして使い、別プロセスとしては起動しない。
-- `cugo_rs485_motor_control/scripts/main.py` はRS-485・モータ単体確認用CLIとし、DNE運転中は起動しない。`rs485Handler.py` と同時起動すると、両方が `/dev/ttyUSB0` を操作して競合するため禁止する。
+- 2600 rpmはモータ保護と車体速度変換の最終上限であり、モード速度の調整には使用しない。
+- 左右のどちらかが2600 rpmを超える場合は、並進速度と角速度を同じ比率で縮小する。
+- 通常停止は実機動作済みの減速停止を使用する。
+- 統合launchの`motor_dry_run`既定値は`false`であり、そのまま起動すると実機へRS-485指令を出す。
+- 通信なしで確認するときは、必ず`motor_dry_run:=true`を明示する。
+- `TangController`を単体実行した場合のROSパラメータ既定値は安全側の`true`だが、統合launchが`false`を上書きする。
 
-DNE運転時の起動例は次のとおりとする。
+起動例：
 
 ```bash
-cd /home/hashimoto/src/tang2dne_handler
-python3 scripts/rs485Handler.py \
-  --host 192.168.212.1 \
-  --port-odm 18080 \
-  --port-ctl 28080 \
-  --robot CuGoV4
+ros2 launch tang_bringup tang_bringup.launch.py motor_dry_run:=true
 ```
 
-DNE運転時の起動区分は次のとおりとする。
+実機出力を有効にする場合は、非常停止を使用できる状態にし、RS-485ポートを他プロセスが開いていないことを確認する。
 
-- 起動する：`rs485Handler.py`
+## 障害物停止
+
+LiDAR基準ではなく、旋回中心を基準にした車体外形と停止余裕で判定する。
+
+| 項目 | 設定値 |
+| --- | ---: |
+| 車体前方長 | `0.320 m` |
+| 車体後方長 | `0.430 m` |
+| 車体半幅 | `0.250 m` |
+| LiDAR位置 | 前方`0.320 m`、横`0.0 m` |
+| FOLLOW・IDLE前方余裕 | `0.300 m` |
+| FOLLOW・IDLE側方余裕 | `0.100 m` |
+| MANUAL前方余裕 | `0.050 m` |
+| MANUAL側方余裕 | `0.050 m` |
+
+- 現在モードに応じて標準判定とMANUAL判定を切り替える。
+- 障害物を検出した周期はモード入力より停止を優先する。
+- 停止時にMANUAL・FOLLOWの平滑化状態をリセットする。
+
+## Modbus異常時の復旧
+
+1. モータ指令で`ModbusError`を検出する。
+2. 異常発生時のモードを記憶し、一時的にIDLEへ移る。
+3. FOLLOWだった場合は`/follow_me/control`へ`pause`を送り、追従対象を保持したまま再捕捉タイマーと速度出力を止める。
+4. RS-485を再接続し、左右へ強制停止を再送する。
+5. 再接続または停止が失敗した間はIDLEを維持して再試行する。
+6. 強制停止に成功したら異常前のIDLE・MANUAL・FOLLOWへ復帰する。
+7. FOLLOW復帰時は古い`/cmd_vel`を破棄し、`resume`を送って新しい指令を待つ。
+
+この処理はUSB-RS485切断中の物理停止を保証しない。ドライバ単体の通信タイムアウトとハードウェア非常停止は別途必要である。
+
+## 起動構成と排他
+
+### TANG運転
+
+- 起動する：URG、TF、`leg_cluster_tracking_node`、`TangController`
+- 起動しない：YPSpur、F710用teleop、旧GPIO PWMモータ制御、DNE用`rs485Handler.py`、`propo_control.py`、モータ単体CLI
+
+### DNE運転
+
+- 起動する：`tang2dne_handler/scripts/rs485Handler.py`
 - 起動しない：`TangController`、`propo_control.py`、`cugo_rs485_motor_control/scripts/main.py`
+- DNE指令は正負とも`0.4167 m/s`以内へ制限してからRS-485ブリッジへ渡す計画とする。
+- DNE/TANG間のモード切替は今回のTANG統合には含めない。
 
-## テスト
+## 確認状況
 
-- RS-485なしのdry-runで、起動後に `IDLE` のまま動かないことを確認する。
-- 起動前からGPIO16/21を押していてもモードが変わらず、一度離して押し直すと遷移することを確認する。
-- GPIO16/21のチャタリングを模擬し、30〜50 msの範囲で設定した除去時間内の変化で複数回遷移しないことを確認する。
-- GPIO16、GPIO21、両方押しの状態遷移を確認する。
-- 現在と同じモードを再選択しても、停止、再初期化、追従開始信号の再送が発生しないことを確認する。
-- GPIO14 LEDがIDLE・MANUALで消灯、FOLLOWで連続点灯、PROPOで0.5秒点灯・4.5秒消灯し、モード切替時に点滅周期がリセットされることを確認する。
-- MANUAL遷移時は必ず低速で開始し、GPIO3・GPIO4の押下で選択した高速・低速設定がボタンを離した後も保持されることを確認する。
-- GPIO3/4の同時押しで低速が優先され、チャタリングで速度設定が複数回切り替わらないことを確認する。
-- MANUAL以外でGPIO3/4を押しても速度設定が保持されず、次回MANUAL遷移時は低速で開始することを確認する。
-- DNEから `1.5 km/h（0.4167 m/s）` を超える並進速度指令を入力しても、RS-485ブリッジへ渡される値が正負とも `0.4167 m/s` 以内に制限されることをdry-runで確認する。
-- FOLLOW遷移時に `/joy` へ仮想ボタン7、FOLLOW離脱時に仮想ボタン6が発行されることを確認する。
-- MANUAL・PROPO選択時、倒れたスティックの値が即時反映されることを確認する。
-- 選択されていない入力と `/cmd_vel` では動かないことを確認する。
-- クローラを浮かせ、左右モータ方向と追従時の `angular.z` 符号を確認する。追従符号の初期値は現行互換の反転とし、結果をパラメータへ固定する。
-- プロポ電源OFF、追従ノード停止、TangControllerの正常終了時に停止することを確認する。
-- USB-RS485切断は、通信タイムアウト実装後のフェイルセーフテストで実施し、今回の走行テスト中には意図的に切断しない。
-- 最後に低速・無人区画で走行し、既設のハードウェア非常停止を確認する。
+### 自動確認済み
 
-## 前提
+- `test/test_controller_core.py`：38件成功
+- `test/test_tang_controller_node.py`：24件成功
+- Python構文チェックと`git diff --check`：成功
+- IDLE起動、モード変更前停止、速度切替、同時押し無視、押下済みボタン無視。
+- MANUAL・FOLLOWの速度上限、曲率維持、EMA、FOLLOW加速制限、即時停止。
+- `/cmd_vel`タイムアウト、障害物停止、ジョイスティックによるMANUAL移行。
+- Modbus異常時の再接続、直前モード復帰、FOLLOWのpause/resume。
+- 2600 rpm最終制限、最低回転数、発進しきい値。
 
-- MR-8のPWM信号は3.3Vなので、GPIO7へ直接入力する。
-- GPIO23/24はLCDと共用せず、GPIO7の裏配線先も他用途に使わない。
-- TANG統合時はプロポCH-HをGPIO7に接続し、GPIO14はモード表示LED専用とする。
-- モード選択後の中立確認は行わない。
-- 今回の試作実装では、BLVD10KMの通信タイムアウト設定と通信ハートビート実装は対象外とする。
-- 通信タイムアウトを実装するまでは、Raspberry Pi停止、プロセス強制終了、USB-RS485切断時の自動停止は保証できない。試験時は必ず既設のハードウェア非常停止を使用できる状態にする。
+### 実機で再確認する項目
+
+- クローラを浮かせ、左右符号、前後進、旋回方向、指令rpm、停止を確認する。
+- LOWから開始し、無人区画でMANUAL・FOLLOWの停止距離と旋回速度を確認する。
+- FOLLOWの通常旋回15 deg/sと、45度超での35 deg/s旋回を確認する。
+- GPIO3・GPIO4の速度切替とLED表示を確認する。
+- 障害物停止と、FOLLOW中のジョイスティック介入を確認する。
+- USB-RS485切断時はハードウェア非常停止を使用し、復旧後に古い指令で再発進しないことを確認する。
+
+## 他リポジトリとの依存
+
+- `cugo_rs485_motor_control`：RS-485通信、左右モータ変換、rpm制限。
+- `icart_mini_ros2/icart_mini_leg_tracker`：距離連動追従、極端角度用旋回速度、`/follow_me/control`のpause/resume。
+- `tang2dne_handler`：DNE指令受信とDNE運転時のRS-485所有。
+
+`follow_extreme_angular_radps`およびpause/resumeは`icart_mini_ros2`側の対応と組み合わせて使用する。関連リポジトリを別々に展開する場合は、受け側を先に反映する。
 
 ## 今後のTODO
 
-- BLVD10KMの通信タイムアウト停止を有効化し、Raspberry Pi停止やUSB-RS485切断時にドライバ単体で停止できるようにする。
-- 通信タイムアウトを有効化する際は、正常時にタイムアウトしないよう、左右両ドライバへの定期ハートビート通信を実装する。
-- 通信タイムアウトで発生するドライバアラームの確認、左右停止、アラームリセット、再操作要求までを一連の安全復帰手順として設計・テストする。
-- 通信タイムアウト実装後、クローラを浮かせた状態からUSB-RS485切断、Raspberry Pi停止、プロセス強制終了を順に試験し、規定時間内に左右とも停止することを確認する。
+- `icart_mini_ros2`側の未コミット変更を内容別に整理し、テスト後にコミットする。
+- DNE用`rs485Handler.py`の速度上限とRS-485ブリッジ統合を完了する。
+- BLVD10KMの通信タイムアウト停止と定期ハートビートを設計・実装する。
+- Raspberry Pi停止、プロセス強制終了、USB-RS485切断時の停止を実機確認する。
+- PROPO用の専用モード入力を決定し、TANGへ統合する。
+- 通常停止と異常時瞬時停止の使い分けを実機評価する。
