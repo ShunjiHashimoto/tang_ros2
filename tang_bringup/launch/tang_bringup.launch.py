@@ -35,7 +35,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "motor_dry_run",
-            default_value="true",
+            default_value="false",
             description="Keep RS-485 motor output disabled when true.",
         ),
         leg_tracker_launch,
