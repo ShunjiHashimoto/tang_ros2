@@ -39,6 +39,12 @@ class TangControlStateTest(unittest.TestCase):
         self.assertEqual(MANUAL, state.mode)
         self.assertEqual(LOW, state.speed_mode)
 
+    def test_follow_transition_resets_speed_to_low(self):
+        state = TangControlState(mode=MANUAL, speed_mode=HIGH)
+        self.assertTrue(state.select_mode(FOLLOW))
+        self.assertEqual(FOLLOW, state.mode)
+        self.assertEqual(LOW, state.speed_mode)
+
     def test_reselecting_current_mode_is_ignored(self):
         state = TangControlState(mode=MANUAL)
         self.assertFalse(state.select_mode(MANUAL))
@@ -53,6 +59,15 @@ class TangControlStateTest(unittest.TestCase):
         self.assertEqual(LOW, state.speed_mode)
 
         state.update_speed_buttons(False, False)
+        self.assertTrue(state.update_speed_buttons(False, True))
+        self.assertEqual(HIGH, state.speed_mode)
+
+        state.update_speed_buttons(False, False)
+        self.assertTrue(state.update_speed_buttons(True, False))
+        self.assertEqual(LOW, state.speed_mode)
+
+    def test_speed_buttons_select_low_and_high_in_follow(self):
+        state = TangControlState(mode=FOLLOW, speed_mode=LOW)
         self.assertTrue(state.update_speed_buttons(False, True))
         self.assertEqual(HIGH, state.speed_mode)
 
@@ -175,14 +190,35 @@ class FollowVelocityTest(unittest.TestCase):
         self.assertAlmostEqual(0.75, smooth_command(1.0, 0.0))
         self.assertAlmostEqual(0.775, smooth_command(1.0, 0.1))
 
-    def test_follow_velocity_is_clamped_in_both_directions(self):
-        self.assertEqual(
-            (Control.follow_max_v_mps, -Control.follow_max_w_radps),
-            limit_follow_velocity(10.0, 10.0),
+    def test_follow_low_and_high_linear_limits(self):
+        requested_v = Control.follow_high_max_v_mps
+        requested_w = 0.20
+
+        low_v, low_w = limit_follow_velocity(requested_v, requested_w, LOW)
+        self.assertEqual(Control.follow_low_max_v_mps, low_v)
+        self.assertAlmostEqual(
+            -requested_w * Control.follow_low_max_v_mps / requested_v,
+            low_w,
         )
         self.assertEqual(
-            (-Control.follow_max_v_mps, Control.follow_max_w_radps),
-            limit_follow_velocity(-10.0, -10.0),
+            (Control.follow_high_max_v_mps, -requested_w),
+            limit_follow_velocity(requested_v, requested_w, HIGH),
+        )
+
+        low_v, low_w = limit_follow_velocity(-requested_v, -requested_w, LOW)
+        self.assertEqual(-Control.follow_low_max_v_mps, low_v)
+        self.assertAlmostEqual(
+            requested_w * Control.follow_low_max_v_mps / requested_v,
+            low_w,
+        )
+
+    def test_follow_low_preserves_curve_radius_and_in_place_turn_limit(self):
+        low_v, low_w = limit_follow_velocity(0.30, 0.20, LOW)
+        high_v, high_w = limit_follow_velocity(0.30, 0.20, HIGH)
+        self.assertAlmostEqual(abs(high_v / high_w), abs(low_v / low_w))
+        self.assertEqual(
+            (0.0, -Control.follow_max_w_radps),
+            limit_follow_velocity(0.0, 10.0, LOW),
         )
 
     def test_non_finite_follow_velocity_becomes_stop(self):
@@ -301,12 +337,12 @@ class TangControlRuntimeTest(unittest.TestCase):
             bridge,
             TangControlState(mode=FOLLOW),
         )
-        result = runtime.apply_follow_input(10.0, -10.0, 0.05)
+        result = runtime.apply_follow_input(0.30, -0.20, 0.05)
         self.assertAlmostEqual(Control.follow_accel_limit_mps2 * 0.05, result[0])
-        self.assertAlmostEqual(Control.command_ema_alpha * Control.follow_max_w_radps, result[1])
+        self.assertAlmostEqual(Control.command_ema_alpha * 0.10, result[1])
         self.assertEqual("velocity", bridge.calls[0][0])
 
-        result = runtime.apply_follow_input(10.0, -10.0, 0.05)
+        result = runtime.apply_follow_input(0.30, -0.20, 0.05)
         self.assertAlmostEqual(Control.follow_accel_limit_mps2 * 0.10, result[0])
 
     def test_follow_zero_command_stops_without_ema_delay(self):

@@ -6,6 +6,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from tang_control.config import Control
 
 
 def generate_launch_description():
@@ -59,7 +60,9 @@ def generate_launch_description():
                 "align_start_angle_rad": math.radians(5.0),
                 "align_stop_angle_rad": math.radians(3.0),
                 "extreme_angle_rad": math.radians(45.0),
-                "follow_max_linear_mps": 0.15,
+                # configのHIGH用上限まで指令を生成し、TANG制御側で
+                # LOW/HIGHそれぞれの最終上限を適用する。
+                "follow_max_linear_mps": Control.follow_high_max_v_mps,
                 "follow_min_linear_mps": 0.05,
                 "follow_max_angular_radps": math.radians(15.0),
             },

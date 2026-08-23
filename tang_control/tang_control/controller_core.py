@@ -123,14 +123,23 @@ def joystick_is_active(raw_steering, raw_throttle):
     return steering_axis != 0.0 or throttle_axis != 0.0
 
 
-def limit_follow_velocity(v_mps, w_radps):
-    """FOLLOW指令をTANG側の最終速度上限に収める。"""
+def limit_follow_velocity(v_mps, w_radps, speed_mode=LOW):
+    """FOLLOW指令を速度モード別の最終上限に収める。"""
     if not math.isfinite(v_mps) or not math.isfinite(w_radps):
         return 0.0, 0.0
-    limited_v = max(
-        -Control.follow_max_v_mps,
-        min(Control.follow_max_v_mps, v_mps),
+    max_v_mps = (
+        Control.follow_high_max_v_mps
+        if speed_mode == HIGH
+        else Control.follow_low_max_v_mps
     )
+    limited_v = max(
+        -max_v_mps,
+        min(max_v_mps, v_mps),
+    )
+    # 走行中に並進だけを制限すると曲率が増すため、角速度も同じ比率で
+    # 下げてLOW/HIGHで同じカーブ半径を保つ。その場旋回は変更しない。
+    if v_mps != 0.0 and abs(limited_v) < abs(v_mps):
+        w_radps *= abs(limited_v / v_mps)
     limited_w = max(
         -Control.follow_max_w_radps,
         min(Control.follow_max_w_radps, w_radps),
@@ -179,30 +188,30 @@ class TangControlState:
     previous_high_pressed: bool = False
 
     def select_mode(self, selected_mode):
-        """モードを変更し、MANUALへ入る場合は必ず低速へ戻す。"""
+        """モードを変更し、走行モードへ入る場合は必ず低速へ戻す。"""
         if selected_mode not in (MANUAL, FOLLOW):
             raise ValueError(f"unsupported mode: {selected_mode}")
         if selected_mode == self.mode:
             return False
         self.mode = selected_mode
-        if selected_mode == MANUAL:
+        if selected_mode in (MANUAL, FOLLOW):
             self.speed_mode = LOW
         return True
 
     def update_speed_buttons(self, low_pressed, high_pressed):
-        """MANUAL中に新しく押された単独の速度ボタンだけを採用する。"""
+        """MANUAL/FOLLOW中に新しく押された単独の速度ボタンだけを採用する。"""
         low_was_pressed = low_pressed and not self.previous_low_pressed
         high_was_pressed = high_pressed and not self.previous_high_pressed
 
         # 一瞬の重なりを両押しと判定しても、押下履歴は更新しない。
         # その後に片方だけが残った場合は、新しい単独押下として扱う。
-        if self.mode == MANUAL and low_pressed and high_pressed:
+        if self.mode in (MANUAL, FOLLOW) and low_pressed and high_pressed:
             return False
 
         self.previous_low_pressed = low_pressed
         self.previous_high_pressed = high_pressed
 
-        if self.mode != MANUAL:
+        if self.mode not in (MANUAL, FOLLOW):
             return False
 
         selected = self.speed_mode
@@ -271,7 +280,11 @@ class TangControlRuntime:
             self.bridge.stop()
             self.reset_follow_ramp()
             return None
-        limited_v, limited_w = limit_follow_velocity(v_mps, w_radps)
+        limited_v, limited_w = limit_follow_velocity(
+            v_mps,
+            w_radps,
+            self.state.speed_mode,
+        )
 
         # 追従対象への到達や旋回優先など、上流から各軸へのゼロ指令は
         # 平滑化で遅らせず即時反映する。

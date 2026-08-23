@@ -248,7 +248,7 @@ class TangController(Node):
         return ((response[1] & 3) << 8) | response[2]
 
     def update_speed_mode(self):
-        """MANUAL中の新しい速度ボタン押下だけを反映する。"""
+        """MANUAL/FOLLOW中の新しい速度ボタン押下だけを反映する。"""
         changed = self.state.update_speed_buttons(
             self.low_speed_button.is_pressed,
             self.high_speed_button.is_pressed,
@@ -334,7 +334,8 @@ class TangController(Node):
         limited_v, limited_w, left_rpm, right_rpm = result
         if now >= self.next_follow_log:
             self.get_logger().info(
-                f"FOLLOW v={limited_v * 3.6:+.2f}km/h "
+                f"FOLLOW {self.state.speed_mode.upper()} "
+                f"v={limited_v * 3.6:+.2f}km/h "
                 f"w={limited_w:+.3f}rad/s "
                 f"left={left_rpm:+.0f}rpm right={right_rpm:+.0f}rpm"
             )
@@ -358,8 +359,8 @@ class TangController(Node):
                     "Joystick input detected during FOLLOW; switching to MANUAL LOW"
                 )
 
-        if mode_changed and self.state.mode == MANUAL:
-            # MANUALは必ず低速で開始する。切替時から速度ボタンが押されて
+        if mode_changed and self.state.mode in (MANUAL, FOLLOW):
+            # MANUAL/FOLLOWは必ず低速で開始する。切替時から速度ボタンが押されて
             # いた場合は採用せず、一度離してからの再押下を要求する。
             self.state.remember_speed_buttons(
                 self.low_speed_button.is_pressed,

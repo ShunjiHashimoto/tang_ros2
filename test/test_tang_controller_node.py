@@ -329,7 +329,7 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         self.assertFalse(any(event[0] == "velocity" for event in events))
 
     def test_manual_to_follow_stops_and_publishes_follow_buttons(self):
-        node, events = make_node(mode=MANUAL)
+        node, events = make_node(mode=MANUAL, speed_mode=HIGH)
         node.last_cmd_vel_time = 123.0
         node.requested_mode = FOLLOW
         self.assertTrue(node.apply_requested_mode())
@@ -341,6 +341,22 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         self.assertIn(("mode_led", "on"), events)
         self.assertIn(("buzzer", "on"), events)
         self.assertEqual(0.0, node.last_cmd_vel_time)
+        self.assertEqual(LOW, node.state.speed_mode)
+
+    def test_follow_speed_buttons_select_high_and_low(self):
+        node, events = make_node(mode=FOLLOW, speed_mode=LOW)
+
+        node.high_speed_button.is_pressed = True
+        node.update_speed_mode()
+        self.assertEqual(HIGH, node.state.speed_mode)
+        self.assertIn(("high_led", "on"), events)
+
+        node.high_speed_button.is_pressed = False
+        node.update_speed_mode()
+        node.low_speed_button.is_pressed = True
+        node.update_speed_mode()
+        self.assertEqual(LOW, node.state.speed_mode)
+        self.assertIn(("low_led", "on"), events)
 
     def test_mode_beep_turns_off_after_deadline(self):
         node, events = make_node(mode=MANUAL)
@@ -373,16 +389,32 @@ class TangControllerOrchestrationTest(unittest.TestCase):
     def test_fresh_follow_cmd_vel_is_applied(self):
         node, events = make_node(mode=FOLLOW)
         msg = sys.modules["geometry_msgs.msg"].Twist()
-        msg.linear.x = 10.0
-        msg.angular.z = -10.0
+        msg.linear.x = 0.30
+        msg.angular.z = -0.20
         node.cmd_vel_callback(msg)
         node.control_once()
 
         velocity_event = next(event for event in events if event[0] == "velocity")
         self.assertAlmostEqual(Control.follow_accel_limit_mps2 * 0.05, velocity_event[1])
         self.assertAlmostEqual(
-            Control.command_ema_alpha * Control.follow_max_w_radps,
+            Control.command_ema_alpha * 0.10,
             velocity_event[2],
+        )
+
+    def test_follow_high_accepts_configured_high_linear_limit(self):
+        node, events = make_node(mode=FOLLOW, speed_mode=HIGH)
+        msg = sys.modules["geometry_msgs.msg"].Twist()
+        msg.linear.x = Control.follow_high_max_v_mps
+        node.cmd_vel_callback(msg)
+        node.control_once()
+
+        self.assertAlmostEqual(
+            Control.follow_accel_limit_mps2 * 0.05,
+            next(event for event in events if event[0] == "velocity")[1],
+        )
+        self.assertAlmostEqual(
+            Control.command_ema_alpha * Control.follow_high_max_v_mps,
+            node.runtime.follow_smoothed_v_mps,
         )
 
     def test_stale_follow_cmd_vel_stops(self):
@@ -410,6 +442,17 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         node, _events = make_node(mode=FOLLOW, speed_mode=HIGH)
         node.high_speed_button.is_pressed = True
         node.requested_mode = MANUAL
+        node.obstacle_near = True
+        node.control_once()
+        self.assertEqual(LOW, node.state.speed_mode)
+
+        node.update_speed_mode()
+        self.assertEqual(LOW, node.state.speed_mode)
+
+    def test_follow_transition_ignores_already_held_high_button(self):
+        node, _events = make_node(mode=MANUAL, speed_mode=HIGH)
+        node.high_speed_button.is_pressed = True
+        node.requested_mode = FOLLOW
         node.obstacle_near = True
         node.control_once()
         self.assertEqual(LOW, node.state.speed_mode)
