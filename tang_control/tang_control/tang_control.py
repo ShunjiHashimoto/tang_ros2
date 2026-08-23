@@ -134,8 +134,13 @@ class TangController(Node):
             self.cmd_vel_callback,
             10,
         )
-        # FOLLOW開始・停止用の仮想Joyと、確認用の現在モードを発行する。
+        # FOLLOW開始・停止用の仮想Joy、通信復旧連携、確認用の現在モードを発行する。
         self.joy_publisher = self.create_publisher(Joy, "/joy", 10)
+        self.follow_control_publisher = self.create_publisher(
+            String,
+            "/follow_me/control",
+            10,
+        )
         self.mode_publisher = self.create_publisher(String, "/tang/mode", 10)
 
         self.update_indicators()
@@ -235,6 +240,12 @@ class TangController(Node):
         msg.buttons = [0] * 12
         msg.buttons[button_index] = 1
         self.joy_publisher.publish(msg)
+
+    def publish_follow_control_command(self, command):
+        """追従対象を保持したまま一時停止・再開する制御コマンドを送る。"""
+        msg = String()
+        msg.data = command
+        self.follow_control_publisher.publish(msg)
 
     def publish_mode(self):
         """現在モードを/tang/modeへ発行する。"""
@@ -405,6 +416,8 @@ class TangController(Node):
             self.motor_fault_mode = self.state.mode
             self.requested_mode = None
             self.state.mode = IDLE
+            if self.motor_fault_mode == FOLLOW:
+                self.publish_follow_control_command("pause")
             self.runtime.reset_motion_filters()
             self.last_cmd_vel_time = 0.0
             self.last_follow_control_time = 0.0
@@ -439,6 +452,8 @@ class TangController(Node):
         self.update_active_obstacle_state()
         self.update_indicators()
         self.publish_mode()
+        if restored_mode == FOLLOW:
+            self.publish_follow_control_command("resume")
         self.get_logger().warning(
             "RS-485 reconnected and stop retry succeeded; "
             f"restored {restored_mode.upper()} mode"

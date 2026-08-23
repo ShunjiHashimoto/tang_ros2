@@ -138,6 +138,7 @@ def make_node(mode=MANUAL, speed_mode=LOW):
     node.next_manual_log = 0.0
     node.next_follow_log = 0.0
     node.joy_publisher = FakePublisher("joy", events)
+    node.follow_control_publisher = FakePublisher("follow_control", events)
     node.mode_publisher = FakePublisher("mode", events)
     node.mode_led = FakeLed("mode_led", events)
     node.low_speed_led = FakeLed("low_led", events)
@@ -235,6 +236,8 @@ class TangControllerOrchestrationTest(unittest.TestCase):
 
         self.assertEqual(FOLLOW, node.state.mode)
         self.assertEqual(0.0, node.last_cmd_vel_time)
+        self.assertIn(("follow_control", "pause"), events)
+        self.assertIn(("follow_control", "resume"), events)
         events.clear()
         node.control_once()
         self.assertIn(("stop", False), events)
@@ -273,11 +276,39 @@ class TangControllerOrchestrationTest(unittest.TestCase):
         self.assertEqual("idle", node.state.mode)
         self.assertTrue(node.motor_fault_active)
         self.assertEqual(MANUAL, node.motor_fault_mode)
+        self.assertFalse(any(event[0] == "follow_control" for event in events))
 
         node.bridge.stop = FakeBridge(events).stop
         self.assertTrue(node.control_once_with_motor_recovery())
         self.assertEqual(MANUAL, node.state.mode)
         self.assertFalse(node.motor_fault_active)
+
+    def test_failed_follow_recovery_pauses_once_then_resumes(self):
+        node, events = make_node(mode=FOLLOW)
+
+        def always_fail_stop(force=False):
+            raise ModbusTimeoutError("timeout while reading 2 bytes")
+
+        node.bridge.stop = always_fail_stop
+
+        self.assertFalse(node.control_once_with_motor_recovery())
+        self.assertEqual(
+            [("follow_control", "pause")],
+            [event for event in events if event[0] == "follow_control"],
+        )
+
+        self.assertFalse(node.control_once_with_motor_recovery())
+        self.assertEqual(
+            [("follow_control", "pause")],
+            [event for event in events if event[0] == "follow_control"],
+        )
+
+        node.bridge.stop = FakeBridge(events).stop
+        self.assertTrue(node.control_once_with_motor_recovery())
+        self.assertEqual(
+            [("follow_control", "pause"), ("follow_control", "resume")],
+            [event for event in events if event[0] == "follow_control"],
+        )
 
     def test_follow_to_manual_stops_before_follow_stop_and_resets_low(self):
         node, events = make_node(mode=FOLLOW, speed_mode=HIGH)
