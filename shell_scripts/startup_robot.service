@@ -1,0 +1,19 @@
+[Unit]
+Description=Start TANG or DNE robot control
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Environment=HOME=/home/pi
+WorkingDirectory=/home/pi/icart_ws/src/tang_ros2
+ExecStart=/home/pi/icart_ws/src/tang_ros2/shell_scripts/auto_start.sh
+ExecStop=/home/pi/icart_ws/src/tang_ros2/shell_scripts/stop_auto_start.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
