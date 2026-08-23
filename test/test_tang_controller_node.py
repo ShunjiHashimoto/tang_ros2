@@ -4,6 +4,7 @@
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 
 def install_ros_stubs():
@@ -49,7 +50,7 @@ install_ros_stubs()
 
 from tang_control.controller_core import FOLLOW, HIGH, IDLE, LOW, MANUAL
 from tang_control.config import Control
-from tang_control.tang_control import TangController
+from tang_control.tang_control import DEFAULT_INITIAL_MODE, TangController
 from cugo_rs485_motor_control.modbus_rtu import ModbusTimeoutError
 
 
@@ -147,6 +148,10 @@ def make_node(mode=MANUAL, speed_mode=LOW):
     node.buzzer_off_at = 0.0
     node.motor_fault_active = False
     node.motor_fault_mode = None
+    node.startup_stop_pending = False
+    node.initial_mode = mode if mode in (IDLE, MANUAL) else IDLE
+    node.motor_dry_run = True
+    node.next_startup_connect_attempt = 0.0
     node.low_speed_button = FakeInput()
     node.high_speed_button = FakeInput()
     node.follow_button = FakeInput()
@@ -159,6 +164,150 @@ def make_node(mode=MANUAL, speed_mode=LOW):
 
 
 class TangControllerOrchestrationTest(unittest.TestCase):
+    def test_direct_node_startup_defaults_to_idle(self):
+        self.assertEqual(IDLE, DEFAULT_INITIAL_MODE)
+
+    def test_manual_startup_stops_and_resets_motion_state(self):
+        node, events = make_node(mode=IDLE, speed_mode=HIGH)
+        node.runtime.manual_v_mps = 0.1
+        node.runtime.manual_w_radps = -0.2
+        node.runtime.follow_smoothed_v_mps = 0.3
+        node.runtime.follow_smoothed_w_radps = -0.4
+        node.runtime.follow_v_mps = 0.2
+        node.last_cmd_vel.linear.x = 0.3
+        node.last_cmd_vel.angular.z = 0.4
+        node.last_cmd_vel_time = 123.0
+        node.last_follow_control_time = 456.0
+        node.high_speed_button.is_pressed = True
+
+        node.initialize_startup_mode(MANUAL)
+
+        self.assertEqual([("stop", True)], events)
+        self.assertFalse(any(event[0] == "velocity" for event in events))
+        self.assertEqual(MANUAL, node.state.mode)
+        self.assertEqual(LOW, node.state.speed_mode)
+        self.assertTrue(node.state.previous_high_pressed)
+        self.assertEqual(0.0, node.runtime.manual_v_mps)
+        self.assertEqual(0.0, node.runtime.manual_w_radps)
+        self.assertEqual(0.0, node.runtime.follow_smoothed_v_mps)
+        self.assertEqual(0.0, node.runtime.follow_smoothed_w_radps)
+        self.assertEqual(0.0, node.runtime.follow_v_mps)
+        self.assertEqual(0.0, node.last_cmd_vel.linear.x)
+        self.assertEqual(0.0, node.last_cmd_vel.angular.z)
+        self.assertEqual(0.0, node.last_cmd_vel_time)
+        self.assertEqual(0.0, node.last_follow_control_time)
+
+        # 最初の制御周期はジョイスティックが倒れていても入力を適用しない。
+        events.clear()
+        node.read_adc = lambda _channel: 960
+        node.control_once()
+        self.assertEqual([("stop", False)], events)
+        self.assertFalse(any(event[0] == "velocity" for event in events))
+        self.assertEqual(LOW, node.state.speed_mode)
+
+        # 停止を確認した次の周期からはMANUAL入力を受け付ける。
+        events.clear()
+        node.control_once()
+        velocity_event = next(event for event in events if event[0] == "velocity")
+        self.assertNotEqual((0.0, 0.0), velocity_event[1:3])
+
+    def test_invalid_startup_mode_is_rejected_without_motor_command(self):
+        node, events = make_node(mode=IDLE)
+
+        with self.assertRaisesRegex(ValueError, "unsupported initial_mode"):
+            node.initialize_startup_mode(FOLLOW)
+
+        self.assertEqual([], events)
+        self.assertEqual(IDLE, node.state.mode)
+
+    def test_startup_connection_failure_stays_idle_then_enters_manual_low(self):
+        node, events = make_node(mode=IDLE, speed_mode=HIGH)
+        node.bridge = None
+        node.runtime = None
+        node.initial_mode = MANUAL
+        node.high_speed_button.is_pressed = True
+        attempts = []
+
+        def create_bridge():
+            attempts.append("connect")
+            if len(attempts) == 1:
+                raise ModbusTimeoutError("timeout while reading 2 bytes")
+            return FakeBridge(events)
+
+        node.create_motor_bridge = create_bridge
+
+        self.assertFalse(node.try_initialize_motor_bridge(now=10.0))
+        self.assertEqual(IDLE, node.state.mode)
+        self.assertIsNone(node.bridge)
+        self.assertIsNone(node.runtime)
+        self.assertEqual([], events)
+
+        # 再試行間隔内は通信を連打しない。
+        self.assertFalse(node.try_initialize_motor_bridge(now=10.5))
+        self.assertEqual(["connect"], attempts)
+
+        # 通信と停止が成功した場合だけMANUAL LOWへ遷移する。
+        with patch("tang_control.tang_control.time.sleep") as sleep_mock:
+            self.assertTrue(node.try_initialize_motor_bridge(now=11.0))
+        self.assertEqual(["connect", "connect"], attempts)
+        self.assertEqual(MANUAL, node.state.mode)
+        self.assertEqual(LOW, node.state.speed_mode)
+        self.assertEqual(("stop", True), events[0])
+        self.assertFalse(any(event[0] == "velocity" for event in events))
+        self.assertTrue(node.state.previous_high_pressed)
+        self.assertTrue(node.startup_stop_pending)
+        self.assertEqual(3, events.count(("buzzer", "on")))
+        self.assertEqual(3, events.count(("buzzer", "off")))
+        self.assertEqual(6, sleep_mock.call_count)
+
+    def test_startup_stop_failure_discards_bridge_and_remains_idle(self):
+        node, events = make_node(mode=IDLE)
+        node.bridge = None
+        node.runtime = None
+        node.initial_mode = MANUAL
+        candidate = FakeBridge(events)
+
+        def fail_stop(force=False):
+            events.append(("stop_failed", force))
+            raise ModbusTimeoutError("timeout while reading 2 bytes")
+
+        candidate.stop = fail_stop
+        node.create_motor_bridge = lambda: candidate
+
+        self.assertFalse(node.try_initialize_motor_bridge(now=20.0))
+
+        self.assertEqual(IDLE, node.state.mode)
+        self.assertIsNone(node.bridge)
+        self.assertIsNone(node.runtime)
+        self.assertIn(("stop_failed", True), events)
+        self.assertIn(("close",), events)
+        self.assertFalse(any(event[0] == "velocity" for event in events))
+
+    def test_control_loop_ignores_mode_requests_while_waiting_for_motor(self):
+        node, events = make_node(mode=IDLE)
+        node.bridge = None
+        node.runtime = None
+        node.initial_mode = MANUAL
+        node.next_startup_connect_attempt = float("inf")
+        node.requested_mode = FOLLOW
+        node.read_adc = lambda _channel: 960
+
+        self.assertFalse(node.control_once_with_motor_recovery())
+
+        self.assertEqual(IDLE, node.state.mode)
+        self.assertIsNone(node.requested_mode)
+        self.assertEqual([], events)
+
+    def test_close_hardware_without_motor_bridge_is_safe(self):
+        node, events = make_node(mode=IDLE)
+        node.bridge = None
+        node.runtime = None
+
+        node.close_hardware()
+
+        self.assertNotIn(("close",), events)
+        self.assertTrue(node.closed)
+
     def test_lidar_callback_uses_manual_clearance_in_manual_mode(self):
         node, _events = make_node(mode=MANUAL)
         scan = types.SimpleNamespace(

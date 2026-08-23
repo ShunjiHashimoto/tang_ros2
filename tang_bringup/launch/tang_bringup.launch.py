@@ -9,6 +9,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     motor_dry_run = LaunchConfiguration("motor_dry_run")
+    initial_mode = LaunchConfiguration("initial_mode")
 
     # URG、TF、脚追従ノードは追従用launchにまとめる。
     leg_tracker_launch = IncludeLaunchDescription(
@@ -28,6 +29,7 @@ def generate_launch_description():
         name="tang_control",
         parameters=[{
             "motor_dry_run": ParameterValue(motor_dry_run, value_type=bool),
+            "initial_mode": ParameterValue(initial_mode, value_type=str),
         }],
         output="screen",
     )
@@ -37,6 +39,12 @@ def generate_launch_description():
             "motor_dry_run",
             default_value="false",
             description="Keep RS-485 motor output disabled when true.",
+        ),
+        DeclareLaunchArgument(
+            "initial_mode",
+            default_value="manual",
+            description="TangController startup mode: idle or manual.",
+            choices=["idle", "manual"],
         ),
         leg_tracker_launch,
         tang_control_node,

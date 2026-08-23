@@ -31,13 +31,30 @@ from tang_control.controller_core import (
 CONTROL_PERIOD_SEC = 0.05
 PRINT_PERIOD_SEC = 0.20
 MODE_BEEP_DURATION_SEC = 0.20
+STARTUP_BEEP_COUNT = 3
+STARTUP_BEEP_ON_SEC = 0.08
+STARTUP_BEEP_OFF_SEC = 0.08
+DEFAULT_INITIAL_MODE = IDLE
+STARTUP_RECONNECT_PERIOD_SEC = 1.0
+MOTOR_CONNECTION_ERRORS = (ModbusError, OSError)
+
+
+def validate_initial_mode(value):
+    """起動モード文字列を正規化し、安全に対応できる値だけを受け付ける。"""
+    initial_mode = str(value).strip().lower()
+    if initial_mode not in (IDLE, MANUAL):
+        raise ValueError(
+            f"unsupported initial_mode: {initial_mode}; "
+            f"expected '{IDLE}' or '{MANUAL}'"
+        )
+    return initial_mode
 
 
 class TangController(Node):
     def __init__(self):
         super().__init__("tang_control")
 
-        # 起動直後はIDLEとし、ボタンを押すまでモーター指令を出さない。
+        # 直接起動時はIDLEとし、bringupから明示された場合だけMANUALで開始する。
         self.state = TangControlState()
         # GPIOのコールバックでは状態を直接変更せず、メインループへ要求を渡す。
         # これにより、モード変更と停止指令が別スレッドで競合するのを防ぐ。
@@ -54,11 +71,19 @@ class TangController(Node):
         self.buzzer_off_at = 0.0
         self.motor_fault_active = False
         self.motor_fault_mode = None
+        self.startup_stop_pending = False
+        self.bridge = None
+        self.runtime = None
+        self.next_startup_connect_attempt = 0.0
 
         # 安全のため既定はdry-runとし、launch引数で明示した場合だけ
         # 実機出力する。
         self.declare_parameter("motor_dry_run", True)
-        motor_dry_run = bool(self.get_parameter("motor_dry_run").value)
+        self.motor_dry_run = bool(self.get_parameter("motor_dry_run").value)
+        self.declare_parameter("initial_mode", DEFAULT_INITIAL_MODE)
+        self.initial_mode = validate_initial_mode(
+            self.get_parameter("initial_mode").value
+        )
 
         self.spi = spidev.SpiDev()
         self.spi.open(0, 0)
@@ -96,31 +121,6 @@ class TangController(Node):
         self.follow_button.when_pressed = lambda: self.request_mode(FOLLOW)
         self.manual_button.when_pressed = lambda: self.request_mode(MANUAL)
 
-        # 実機動作済みのCuGoV4設定を変更せず使用する。
-        # 左モーターは符号反転、右モーターは通常方向として扱う。
-        self.bridge = Rs485DualMotorBridge(
-            port="/dev/ttyUSB0",
-            baudrate=9600,
-            timeout=0.3,
-            left_slave=2,
-            right_slave=1,
-            config=MotorBridgeConfig(
-                op_no=2,
-                wheel_radius_left=Control.wheel_radius_left,
-                wheel_radius_right=Control.wheel_radius_right,
-                tread=Control.tread,
-                reduction_ratio=Control.reduction_ratio,
-                max_rpm=Control.rs485_max_motor_rpm,
-                min_rpm=Control.rs485_min_motor_rpm,
-                anti_creep_start_rpm=Control.anti_creep_start_rpm,
-                left_motor_sign=-1,
-                right_motor_sign=1,
-                deceleration_stop=True,
-            ),
-            dry_run=motor_dry_run,
-        )
-        self.runtime = TangControlRuntime(self.bridge, self.state)
-
         # LiDARは従来どおり近接停止に使用する。
         self.lidar_subscription = self.create_subscription(
             LaserScan,
@@ -143,12 +143,115 @@ class TangController(Node):
         )
         self.mode_publisher = self.create_publisher(String, "/tang/mode", 10)
 
+        motor_ready = self.try_initialize_motor_bridge(force=True)
         self.update_indicators()
         self.publish_mode()
-        dry_run_state = "enabled" if motor_dry_run else "disabled"
-        self.get_logger().info(
-            f"TangController ready: IDLE, RS-485 dry-run={dry_run_state}"
+        dry_run_state = "enabled" if self.motor_dry_run else "disabled"
+        if motor_ready:
+            self.get_logger().info(
+                f"TangController ready: {self.state.mode.upper()}, "
+                f"RS-485 dry-run={dry_run_state}"
+            )
+        else:
+            self.get_logger().warning(
+                "TangController waiting in IDLE for RS-485 communication "
+                f"and forced stop; requested mode={self.initial_mode.upper()}, "
+                f"RS-485 dry-run={dry_run_state}"
+            )
+
+    def create_motor_bridge(self):
+        """実機動作済みのCuGoV4設定で、起動時停止を行うブリッジを生成する。"""
+        return Rs485DualMotorBridge(
+            port="/dev/ttyUSB0",
+            baudrate=9600,
+            timeout=0.3,
+            left_slave=2,
+            right_slave=1,
+            config=MotorBridgeConfig(
+                op_no=2,
+                wheel_radius_left=Control.wheel_radius_left,
+                wheel_radius_right=Control.wheel_radius_right,
+                tread=Control.tread,
+                reduction_ratio=Control.reduction_ratio,
+                max_rpm=Control.rs485_max_motor_rpm,
+                min_rpm=Control.rs485_min_motor_rpm,
+                anti_creep_start_rpm=Control.anti_creep_start_rpm,
+                left_motor_sign=-1,
+                right_motor_sign=1,
+                deceleration_stop=True,
+            ),
+            dry_run=self.motor_dry_run,
         )
+
+    def try_initialize_motor_bridge(self, now=None, force=False):
+        """通信と強制停止を確認し、成功するまではIDLEで再試行する。"""
+        if self.bridge is not None and self.runtime is not None:
+            return True
+
+        if now is None:
+            now = time.monotonic()
+        if not force and now < self.next_startup_connect_attempt:
+            return False
+
+        self.requested_mode = None
+        self.state.mode = IDLE
+        self.startup_stop_pending = False
+        candidate_bridge = None
+        try:
+            # Rs485DualMotorBridge生成時に左右へ強制停止が送られる。
+            candidate_bridge = self.create_motor_bridge()
+            self.bridge = candidate_bridge
+            self.runtime = TangControlRuntime(self.bridge, self.state)
+            # MANUAL要求時は、もう一度停止を確認してからLOWへ遷移する。
+            self.initialize_startup_mode(self.initial_mode)
+        except MOTOR_CONNECTION_ERRORS as error:
+            if candidate_bridge is not None:
+                try:
+                    candidate_bridge.close()
+                except MOTOR_CONNECTION_ERRORS:
+                    pass
+            self.bridge = None
+            self.runtime = None
+            self.state.mode = IDLE
+            self.next_startup_connect_attempt = now + STARTUP_RECONNECT_PERIOD_SEC
+            self.get_logger().error(
+                f"RS-485 startup check failed: {error}; "
+                "remaining in IDLE and retrying"
+            )
+            return False
+
+        self.next_startup_connect_attempt = 0.0
+        self.update_active_obstacle_state()
+        self.update_indicators()
+        self.publish_mode()
+        self.get_logger().warning(
+            "RS-485 communication and forced stop confirmed; "
+            f"entered {self.state.mode.upper()} {self.state.speed_mode.upper()}"
+        )
+        self.play_startup_ready_beep()
+        return True
+
+    def initialize_startup_mode(self, initial_mode):
+        """起動モードへ入る前に停止し、入力と平滑化状態を初期化する。"""
+        initial_mode = validate_initial_mode(initial_mode)
+        if initial_mode == IDLE:
+            return
+
+        # MANUALを有効にする前に必ず停止を送る。select_modeは速度をLOWへ戻し、
+        # runtime内のMANUAL/FOLLOW平滑化状態もゼロへ初期化する。
+        self.runtime.select_mode(MANUAL)
+        self.requested_mode = None
+        self.last_cmd_vel = Twist()
+        self.last_cmd_vel_time = 0.0
+        self.last_follow_control_time = 0.0
+        # 起動時に速度ボタンが押されていてもHIGHへ遷移させず、再押下を要求する。
+        self.state.remember_speed_buttons(
+            self.low_speed_button.is_pressed,
+            self.high_speed_button.is_pressed,
+        )
+        # 制御ループの初回周期でも入力を適用せず、停止状態を確認してから
+        # 2周期目以降にMANUAL操作を受け付ける。
+        self.startup_stop_pending = True
 
     def request_mode(self, mode):
         """GPIOで選択されたモードを、次の制御周期で処理するため保存する。"""
@@ -187,6 +290,15 @@ class TangController(Node):
         """モード切替を短いブザー音で通知する。"""
         self.buzzer.on()
         self.buzzer_off_at = time.monotonic() + MODE_BEEP_DURATION_SEC
+
+    def play_startup_ready_beep(self):
+        """DNEと同じ3回の短音で、モータを操作できる起動完了を通知する。"""
+        self.buzzer_off_at = 0.0
+        for _count in range(STARTUP_BEEP_COUNT):
+            self.buzzer.on()
+            time.sleep(STARTUP_BEEP_ON_SEC)
+            self.buzzer.off()
+            time.sleep(STARTUP_BEEP_OFF_SEC)
 
     def update_buzzer(self):
         """ブザー時間が満了したら、制御ループを止めずに消音する。"""
@@ -355,6 +467,13 @@ class TangController(Node):
     def control_once(self):
         """1制御周期分のモード、速度、安全停止、手動操作を処理する。"""
         self.update_buzzer()
+        if self.startup_stop_pending:
+            self.bridge.stop()
+            self.runtime.reset_motion_filters()
+            self.last_follow_control_time = 0.0
+            self.startup_stop_pending = False
+            return
+
         mode_changed = self.apply_requested_mode()
 
         manual_takeover_input = None
@@ -400,6 +519,11 @@ class TangController(Node):
 
     def control_once_with_motor_recovery(self):
         """Modbus通信異常時は一時停止し、再接続後に直前モードへ復帰する。"""
+        if self.bridge is None or self.runtime is None:
+            self.requested_mode = None
+            self.state.mode = IDLE
+            return self.try_initialize_motor_bridge()
+
         if self.motor_fault_active:
             self.requested_mode = None
             return self.recover_motor_connection()
@@ -407,7 +531,7 @@ class TangController(Node):
         try:
             self.control_once()
             return True
-        except ModbusError as error:
+        except MOTOR_CONNECTION_ERRORS as error:
             self.get_logger().error(
                 f"RS-485 motor command failed: {error}; "
                 "temporarily switching to IDLE and retrying stop after reconnect"
@@ -430,7 +554,7 @@ class TangController(Node):
         try:
             self.bridge.reconnect()
             self.bridge.stop(force=True)
-        except ModbusError as error:
+        except MOTOR_CONNECTION_ERRORS as error:
             self.get_logger().error(
                 f"RS-485 reconnect/stop retry failed: {error}; "
                 "remaining temporarily in IDLE"
@@ -475,7 +599,8 @@ class TangController(Node):
             return
         self.closed = True
         try:
-            self.bridge.close()
+            if self.bridge is not None:
+                self.bridge.close()
         finally:
             self.mode_led.off()
             self.low_speed_led.off()
