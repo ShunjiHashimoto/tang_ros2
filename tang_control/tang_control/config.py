@@ -106,12 +106,16 @@ class Control:
     manual_throttle_sign = -1.0
     # 同じ取付変更でCH0も反転したため、西側への操作をROSの正角速度にする。
     manual_steering_sign = 1.0
-    # DNE実機調整値のFollowYawRate=15 deg/sに合わせる。
-    follow_max_w_radps = math.radians(15.0)
     follow_low_max_v_mps = 0.15
     follow_high_max_v_mps = 0.30
     # 旧参照との互換用。FOLLOWの既定・LOW上限を示す。
     follow_max_v_mps = follow_low_max_v_mps
+    # TANG追従旋回の調整値はここを唯一の参照元とする。
+    follow_normal_max_w_radps = math.radians(15.0)
+    follow_extreme_angle_rad = math.radians(45.0)
+    follow_extreme_max_w_radps = math.radians(35.0)
+    # モータへ渡す最終安全上限は、45度超の旋回上限に合わせる。
+    follow_max_w_radps = follow_extreme_max_w_radps
     follow_angular_sign = -1.0
     command_ema_alpha = 0.75
     follow_accel_limit_mps2 = 1.0

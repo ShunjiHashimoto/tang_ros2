@@ -59,12 +59,13 @@ def generate_launch_description():
                 "near_exit_distance_m": 0.65,
                 "align_start_angle_rad": math.radians(5.0),
                 "align_stop_angle_rad": math.radians(3.0),
-                "extreme_angle_rad": math.radians(45.0),
+                "extreme_angle_rad": Control.follow_extreme_angle_rad,
                 # configのHIGH用上限まで指令を生成し、TANG制御側で
                 # LOW/HIGHそれぞれの最終上限を適用する。
                 "follow_max_linear_mps": Control.follow_high_max_v_mps,
                 "follow_min_linear_mps": 0.05,
-                "follow_max_angular_radps": math.radians(15.0),
+                "follow_max_angular_radps": Control.follow_normal_max_w_radps,
+                "follow_extreme_angular_radps": Control.follow_extreme_max_w_radps,
             },
         ],
         output="screen",

@@ -183,8 +183,23 @@ class ObstacleDetectionTest(unittest.TestCase):
 
 
 class FollowVelocityTest(unittest.TestCase):
-    def test_follow_turn_limit_matches_dne_fifteen_degrees_per_second(self):
-        self.assertAlmostEqual(math.radians(15.0), Control.follow_max_w_radps)
+    def test_follow_turn_limits_are_centralized_in_config(self):
+        self.assertAlmostEqual(
+            math.radians(15.0),
+            Control.follow_normal_max_w_radps,
+        )
+        self.assertAlmostEqual(
+            math.radians(45.0),
+            Control.follow_extreme_angle_rad,
+        )
+        self.assertAlmostEqual(
+            math.radians(35.0),
+            Control.follow_extreme_max_w_radps,
+        )
+        self.assertEqual(
+            Control.follow_extreme_max_w_radps,
+            Control.follow_max_w_radps,
+        )
 
     def test_command_ema_matches_tang_follow_smoothing(self):
         self.assertAlmostEqual(0.75, smooth_command(1.0, 0.0))
