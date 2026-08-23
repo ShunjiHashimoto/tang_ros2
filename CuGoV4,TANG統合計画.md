@@ -4,7 +4,8 @@
 
 TANGのモード選択、MANUAL・FOLLOW入力、安全停止、CuGoV4へのRS-485モータ指令を、既存の`TangController`へ集約する。
 
-- 起動時は必ず`IDLE`とし、モードボタンが押されるまで停止を維持する。
+- 統合bringupでは停止指令と入力初期化を先行し、`MANUAL LOW`で起動する。
+- `TangController`単体起動の既定値は安全側の`IDLE`とし、launchの`initial_mode`で起動モードを明示する。
 - 現行の走行モードは`MANUAL`と`FOLLOW`とする。
 - PROPOはモード選択方法が確定するまで統合対象外とする。
 - DNE運転は`TangController`と同時起動せず、別の起動構成で扱う。
@@ -24,9 +25,13 @@ TANGのモード選択、MANUAL・FOLLOW入力、安全停止、CuGoV4へのRS-4
 - FOLLOW中のジョイスティック操作を優先し、MANUAL低速へ切り替える処理。
 - 車体外形とLiDAR位置を考慮した近接障害物停止。
 - Modbus異常時の一時IDLE化、再接続、強制停止確認、直前モードへの復帰。
+- 起動時のModbus通信不能ではIDLEを維持し、1秒周期で通信と強制停止を再確認してから要求された初期モードへ遷移。
+- 通信と強制停止を確認して操作可能になった時点で、80 msの短音を3回鳴らして起動完了を通知。
 - FOLLOWの通信復旧中に`/follow_me/control`へ`pause`、復旧後に`resume`を送る連携。
 - 統合launchからURG、TF、人物追従ノード、`TangController`を起動する構成。
-- コアテスト38件、TangControllerノードテスト24件の自動確認。
+- Raspberry Piの共通systemdサービスからTANGまたはDNEの片方を選択して自動起動する構成。
+- 統合bringupのMANUAL LOW起動と、単体起動時のIDLE維持。
+- コアテスト38件、TangControllerノードテスト31件、bringup launchテスト2件、自動起動テスト4件の自動確認。
 
 ### 保留・実機確認が必要
 
@@ -40,7 +45,7 @@ TANGのモード選択、MANUAL・FOLLOW入力、安全停止、CuGoV4へのRS-4
 
 ### IDLE
 
-- 起動直後の初期状態。
+- `TangController`単体起動、またはbringupで`initial_mode:=idle`を指定した場合の初期状態。
 - 左右モータ停止を維持する。
 - GPIO14のモードLEDは消灯する。
 - `/cmd_vel`は採用しない。
@@ -48,6 +53,7 @@ TANGのモード選択、MANUAL・FOLLOW入力、安全停止、CuGoV4へのRS-4
 
 ### MANUAL
 
+- 統合bringupの既定初期モード。モータ停止、LOW初期化、最初の制御周期での停止確認を経て入力を受け付ける。
 - GPIO21の新しい押下で遷移する。
 - 遷移前に左右へ強制停止を送り、速度モードをLOWへ戻す。
 - MCP3004のCH0を操舵、CH1を前後入力として使用する。
@@ -157,6 +163,20 @@ LiDAR基準ではなく、旋回中心を基準にした車体外形と停止余
 
 ## Modbus異常時の復旧
 
+### 起動時
+
+1. `TangController`ノード、GPIO、ROS publisher/subscriptionをIDLEで初期化する。
+2. RS-485ブリッジを生成し、左右モータへの強制停止を試みる。
+3. シリアルポート未検出、Modbusタイムアウト、応答異常の場合はIDLEを維持する。
+4. モードボタンとジョイスティック入力を採用せず、1秒周期で再接続する。
+5. 通信と左右の強制停止が成功した場合だけ、bringupで要求されたMANUAL LOWへ遷移する。
+6. DNEと同じ80 ms ON・80 ms OFFの短音を3回鳴らす。
+7. MANUAL遷移後も最初の制御周期は停止のみとし、次周期からジョイスティック入力を受け付ける。
+
+非常停止がモータドライバの通信を遮断する構成でも、非常停止解除後の再試行で安全な停止を確認してから操作可能になる。
+
+### 走行開始後
+
 1. モータ指令で`ModbusError`を検出する。
 2. 異常発生時のモードを記憶し、一時的にIDLEへ移る。
 3. FOLLOWだった場合は`/follow_me/control`へ`pause`を送り、追従対象を保持したまま再捕捉タイマーと速度出力を止める。
@@ -173,22 +193,36 @@ LiDAR基準ではなく、旋回中心を基準にした車体外形と停止余
 
 - 起動する：URG、TF、`leg_cluster_tracking_node`、`TangController`
 - 起動しない：YPSpur、F710用teleop、旧GPIO PWMモータ制御、DNE用`rs485Handler.py`、`propo_control.py`、モータ単体CLI
+- 起動モードをTANGに設定した場合、`startup_robot.service`がDockerを起動し、`ros2 launch tang_bringup tang_bringup.launch.py`を実行する。
+- 統合bringupの`initial_mode`既定値は`manual`とし、保守時は`initial_mode:=idle`を指定できる。
 
 ### DNE運転
 
 - 起動する：`tang2dne_handler/scripts/rs485Handler.py`
 - 起動しない：`TangController`、`propo_control.py`、`cugo_rs485_motor_control/scripts/main.py`
+- 起動モードをDNEに設定した場合、`startup_robot.service`がDockerを使わず、ホスト上でCuGoV4用`rs485Handler.py`を実行する。
 - DNE指令は正負とも`0.4167 m/s`以内へ制限してからRS-485ブリッジへ渡す計画とする。
 - DNE/TANG間のモード切替は今回のTANG統合には含めない。
+
+自動起動モードは`~/.config/tang/startup_mode`へ保存し、次のコマンドで切り替える。
+
+```bash
+./shell_scripts/select_startup_mode.sh tang
+./shell_scripts/select_startup_mode.sh dne
+```
+
+共通サービスはTANGとDNEを同時起動しない。選択外の制御プロセスを検出した場合は、`/dev/ttyUSB0`の二重所有を避けるため起動を拒否する。
 
 ## 確認状況
 
 ### 自動確認済み
 
 - `test/test_controller_core.py`：38件成功
-- `test/test_tang_controller_node.py`：24件成功
+- `test/test_tang_controller_node.py`：31件成功
+- `test/test_tang_bringup_launch.py`：2件成功
+- `test/test_auto_start_scripts.py`：4件成功
 - Python構文チェックと`git diff --check`：成功
-- IDLE起動、モード変更前停止、速度切替、同時押し無視、押下済みボタン無視。
+- 単体ノードのIDLE起動、bringupのMANUAL LOW起動、起動時停止、速度切替、同時押し無視、押下済みボタン無視。
 - MANUAL・FOLLOWの速度上限、曲率維持、EMA、FOLLOW加速制限、即時停止。
 - `/cmd_vel`タイムアウト、障害物停止、ジョイスティックによるMANUAL移行。
 - Modbus異常時の再接続、直前モード復帰、FOLLOWのpause/resume。

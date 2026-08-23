@@ -25,11 +25,22 @@ URG、固定TF、脚追従ノード、TANG制御ノードを1つのlaunchで起�
 ros2 launch tang_bringup tang_bringup.launch.py
 ```
 
-既定ではRS-485出力を行わないdry-runです。クローラを浮かせ、非常停止を
-使用できる状態で実機出力を明示的に有効化する場合は次を使用します。
+統合bringupでは`initial_mode:=manual`が既定で、停止指令を送ってLOWへ初期化した後、
+MANUAL操作を受け付けます。保守作業などでIDLE起動する場合は次を使用します。
+
+起動時にモータドライバと通信できない場合は、TANG制御ノードを終了させずIDLEを維持し、
+1秒周期で再接続します。左右への強制停止が成功した場合だけMANUAL LOWへ移ります。
+操作可能になると、DNEと同じ80msの短音を3回鳴らして起動完了を通知します。
 
 ```bash
-ros2 launch tang_bringup tang_bringup.launch.py motor_dry_run:=false
+ros2 launch tang_bringup tang_bringup.launch.py initial_mode:=idle
+```
+
+既定ではRS-485出力が有効です。クローラを浮かせ、非常停止を
+使用できる状態で起動してください。モータへ指令を送らず確認する場合は次を使用します。
+
+```bash
+ros2 launch tang_bringup tang_bringup.launch.py motor_dry_run:=true
 ```
 
 ## 🚦 モード切替機能
@@ -100,30 +111,92 @@ ros2 launch tang_bringup tang_bringup.launch.py motor_dry_run:=false
 
 ---
 
-## ▶️ 実行方法
+## ▶️ 電源投入時の自動起動
+
+Raspberry Piの共通systemdサービスから、TANG運転またはDNE運転のどちらか一方を起動します。
+初期設定はTANGです。
+
+TANG運転ではDockerコンテナ内で次のlaunchを実行し、MANUAL LOWで起動します。
 
 ```bash
-ubuntu@raspi5:/etc/systemd/system$ cat startup_raspi.service 
-[Unit]
-Description=Start TANG ROS2 docker container with ROS2 launch
-After=network.target docker.service
-Requires=docker.service
-
-[Service]
-Restart=always
-ExecStart=/home/ubuntu/icart_ws/src/tang_ros2/shell_scripts/auto_start.sh
-WorkingDirectory=/home/ubuntu/icart_ws/src/tang_ros2/shell_scripts
-User=ubuntu
-
-[Install]
-WantedBy=multi-user.targetros2 run tang_control tang_control
+ros2 launch tang_bringup tang_bringup.launch.py
 ```
 
-ログ確認
+DNE運転ではDockerを使用せず、ホスト上で次のハンドラを実行します。
+
 ```bash
-journalctl -u startup_raspi.service -f
+python3 ~/icart_ws/src/tang2dne_handler/scripts/rs485Handler.py \
+  --host 192.168.212.1 \
+  --port-odm 18080 \
+  --port-ctl 28080 \
+  --robot CuGoV4
 ```
-停止
+
+初回だけ、リポジトリに含まれる導入スクリプトを実行します。
+
 ```bash
-sudo systemctl stop startup_raspi.service
+cd ~/icart_ws/src/tang_ros2
+./shell_scripts/install_auto_start.sh
 ```
+
+次回の電源投入で使用するモードは、次のコマンドだけで切り替えられます。
+
+```bash
+# TANG運転へ切替
+./shell_scripts/select_startup_mode.sh tang
+
+# DNE運転へ切替
+./shell_scripts/select_startup_mode.sh dne
+```
+
+選択値は`~/.config/tang/startup_mode`に保存されます。共通サービスは必ず片方だけを起動し、
+もう一方の制御プロセスが動いている場合はRS-485競合を避けるため起動を拒否します。
+
+導入時は次回の電源投入から有効になります。その場で起動する場合は明示的に開始します。
+
+```bash
+sudo systemctl start startup_robot.service
+```
+
+状態・ログ確認：
+
+```bash
+systemctl status startup_robot.service
+journalctl -u startup_robot.service -f
+```
+
+### 自動起動したプロセスの停止
+
+systemdによって自動起動したTANG運転またはDNE運転は、サービスを停止します。
+
+```bash
+sudo systemctl stop startup_robot.service
+```
+
+TANG運転中はDockerコンテナ`icart_mini_ros2`が停止し、DNE運転中は
+`rs485Handler.py`が停止します。停止できたことは次のコマンドで確認できます。
+
+```bash
+systemctl status startup_robot.service
+docker ps --filter name=icart_mini_ros2
+```
+
+`stop_auto_start.sh`はsystemdの`ExecStop`から呼び出される内部スクリプトです。
+これだけを直接実行すると、サービスに設定された`Restart=always`によって再起動する可能性が
+あるため、自動起動したプロセスの停止には`systemctl stop`を使用してください。
+
+`./shell_scripts/auto_start.sh`をsystemdを介さず手動で実行した場合に限り、
+次のコマンドで停止できます。
+
+```bash
+./shell_scripts/stop_auto_start.sh
+```
+
+自動起動を無効化する場合：
+
+```bash
+sudo systemctl disable startup_robot.service
+```
+
+systemdからはTTYなしでDockerを起動するため、`icart_mini_ros2/docker/run.sh`は
+対話端末がある場合だけ`-it`を付けます。GUI用のX11マウントも`DISPLAY`がある場合だけ追加します。
