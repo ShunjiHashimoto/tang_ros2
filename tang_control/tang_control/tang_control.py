@@ -307,14 +307,14 @@ class TangController(Node):
 
         now = time.monotonic()
         # ログ量を抑えつつ、入力値と演算結果を追える周期で表示する。
-        if now >= self.next_manual_log:
-            self.get_logger().info(
-                f"MANUAL {self.state.speed_mode.upper()} "
-                f"CH0={raw_steering} CH1={raw_throttle} "
-                f"v={limited_v * 3.6:+.2f}km/h w={limited_w:+.3f}rad/s "
-                f"left={left_rpm:+.0f}rpm right={right_rpm:+.0f}rpm"
-            )
-            self.next_manual_log = now + PRINT_PERIOD_SEC
+        #if now >= self.next_manual_log:
+        #    self.get_logger().info(
+        #        f"MANUAL {self.state.speed_mode.upper()} "
+        #        f"CH0={raw_steering} CH1={raw_throttle} "
+        #        f"v={limited_v * 3.6:+.2f}km/h w={limited_w:+.3f}rad/s "
+        #        f"left={left_rpm:+.0f}rpm right={right_rpm:+.0f}rpm"
+        #    )
+        #    self.next_manual_log = now + PRINT_PERIOD_SEC
 
     def follow_control(self):
         """FOLLOWの最新指令を、タイムアウト付きでモーターへ渡す。"""
